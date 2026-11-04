@@ -42,6 +42,16 @@
                 </a>
             </nav>
 
+            {{if .HubURL}}
+            <span class="side-label">Koria Hub</span>
+            <nav class="side-nav" aria-label="Koria Hub">
+                <a class="side-link" href="{{.HubURL}}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+                    Voltar ao Hub
+                </a>
+            </nav>
+            {{end}}
+
             <span class="side-label">Desenvolvedores</span>
             <nav class="side-nav" aria-label="Desenvolvedores">
                 <a class="side-link" href="/api/docs" target="_blank" rel="noopener noreferrer">
@@ -53,6 +63,12 @@
             <div class="side-spacer"></div>
 
             <div class="side-footer">
+                {{if .HubUser}}
+                <div class="user-chip">
+                    <span title="{{.HubUser}}">{{.HubUser}}</span>
+                    <form method="post" action="/logout"><button type="submit" class="button-ghost button-sm">Sair</button></form>
+                </div>
+                {{end}}
                 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro">
                     <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
                     <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-2.93 1.41-1.41m11.32-11.32 1.41-1.41M2 12h2m16 0h2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41"/></svg>
@@ -237,7 +253,7 @@
         var sidebar = document.getElementById('sidebar');
         var menuButton = document.getElementById('menu-button');
 
-        function toast(message, isError) {
+        function toast(message, isError, linkUrl) {
             var region = document.getElementById('toast-region');
             var el = document.createElement('div');
             el.className = 'toast';
@@ -245,8 +261,16 @@
                 el.style.borderLeftColor = 'hsl(var(--destructive))';
             }
             el.textContent = message;
+            if (linkUrl && /^https?:\/\//i.test(linkUrl)) {
+                var link = document.createElement('a');
+                link.href = linkUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = ' Abrir Minhas tarefas';
+                el.appendChild(link);
+            }
             region.appendChild(el);
-            setTimeout(function () { el.remove(); }, 5000);
+            setTimeout(function () { el.remove(); }, isError ? 8000 : 10000);
         }
 
         // Datas chegam em UTC; mostramos no fuso do navegador.
@@ -273,6 +297,20 @@
         document.body.addEventListener('htmx:afterSettle', function () {
             localizeTimes();
             syncTitle();
+        });
+
+        // "Enviar ao Hub": a resposta é JSON com a mensagem e o link das tarefas.
+        document.body.addEventListener('htmx:afterRequest', function (event) {
+            var el = event.detail.elt;
+            if (!el || !el.hasAttribute || !el.hasAttribute('data-hub-send') || !event.detail.successful) {
+                return;
+            }
+            try {
+                var answer = JSON.parse(event.detail.xhr.responseText);
+                toast(answer.message, false, answer.url);
+            } catch (e) {
+                toast('Contatos enviados ao Hub.');
+            }
         });
 
         // Formulário: limpa o erro ao enviar e confirma quando criou.

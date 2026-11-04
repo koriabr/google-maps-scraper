@@ -601,6 +601,11 @@ form.htmx-request .htmx-indicator {
     display: inline-block;
 }
 
+button.htmx-request {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 form.htmx-request button[type='submit'] {
     opacity: 0.7;
     pointer-events: none;
@@ -1166,4 +1171,52 @@ tbody tr:hover {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* ───────────── Entrar pelo Hub ───────────── */
+
+.login-page {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    padding: 24px;
+}
+
+.login-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: min(420px, 100%);
+    padding: 32px;
+    animation: koria-fade-in-up 0.4s ease-out both;
+}
+
+.login-brand {
+    padding: 0;
+}
+
+.login-card h1 {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.user-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: hsl(var(--sidebar-foreground));
+}
+
+.user-chip span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-chip form {
+    flex: none;
 }

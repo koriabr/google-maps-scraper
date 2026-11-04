@@ -35,6 +35,12 @@
                     hx-target="#map-modal-container"
                     hx-swap="innerHTML">Ver mapa</button>
             <a href="/download?id={{.ID}}" download class="button button-ghost button-sm download-button">Baixar CSV</a>
+            {{ if $.HubSend }}
+            <button type="button" class="button button-ghost button-sm hub-send-button" data-hub-send
+                    hx-post="/hub/send?id={{.ID}}"
+                    hx-swap="none"
+                    hx-confirm="Enviar as empresas desta pesquisa para as suas tarefas no Hub (Minhas tarefas)? Empresas sem telefone, site ou e-mail não são enviadas. Enviar de novo não duplica.">Enviar ao Hub</button>
+            {{ end }}
         {{ end }}
         <button hx-delete="/delete?id={{.ID}}&page={{$.CurrentPage}}"
                 hx-target="#jobs-region"

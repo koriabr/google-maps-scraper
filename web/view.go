@@ -52,6 +52,8 @@ type jobsView struct {
 	WorkingCnt  int
 	QueuedCnt   int
 	PollEvery   string
+	// HubSend shows the "Enviar ao Hub" action on finished jobs.
+	HubSend bool
 }
 
 func newJobRowView(job *Job, now time.Time) jobRowView {
@@ -202,4 +204,12 @@ func defaultJobName(keywords []string) string {
 	}
 
 	return name
+}
+
+// newJobsView builds the view and adds the server-level switches.
+func (s *Server) newJobsView(page JobPage, active []Job, now time.Time) jobsView {
+	view := newJobsView(page, active, now)
+	view.HubSend = s.hub != nil && s.hub.cfg.CanSend()
+
+	return view
 }
