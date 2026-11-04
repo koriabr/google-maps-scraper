@@ -11,6 +11,7 @@ import (
 	"github.com/mcnijman/go-emailaddress"
 
 	"github.com/gosom/google-maps-scraper/exiter"
+	"github.com/gosom/google-maps-scraper/internal/mailfilter"
 )
 
 type EmailExtractJobOptions func(*EmailExtractJob)
@@ -110,7 +111,7 @@ func docEmailExtractor(doc *goquery.Document) []string {
 		mailto, exists := s.Attr("href")
 		if exists {
 			value := strings.TrimPrefix(mailto, "mailto:")
-			if email, err := getValidEmail(value); err == nil {
+			if email, err := getValidEmail(value); err == nil && !mailfilter.IsPlaceholder(email) {
 				if !seen[email] {
 					emails = append(emails, email)
 					seen[email] = true
@@ -129,9 +130,16 @@ func regexEmailExtractor(body []byte) []string {
 
 	addresses := emailaddress.Find(body, false)
 	for i := range addresses {
-		if !seen[addresses[i].String()] {
-			emails = append(emails, addresses[i].String())
-			seen[addresses[i].String()] = true
+		address := addresses[i].String()
+
+		// Skip placeholders like "seuemail@email.com" left in forms and footers.
+		if mailfilter.IsPlaceholder(address) {
+			continue
+		}
+
+		if !seen[address] {
+			emails = append(emails, address)
+			seen[address] = true
 		}
 	}
 

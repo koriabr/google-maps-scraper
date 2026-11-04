@@ -237,3 +237,22 @@ func TestJobViewShowsContactsAndCopyButton(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePlacesDropsPlaceholderEmails(t *testing.T) {
+	csv := "title,latitude,longitude,emails\n" +
+		"A,1.5,2.5,\"contato@empresa.com.br, seuemail@email.com\"\n" +
+		"B,1.6,2.6,\"seuemail@email.com\"\n"
+
+	places, err := parsePlaces(strings.NewReader(csv))
+	if err != nil {
+		t.Fatalf("parsePlaces: %v", err)
+	}
+
+	if got := places[0].Emails; len(got) != 1 || got[0] != "contato@empresa.com.br" {
+		t.Fatalf("emails = %q, want only the real one", got)
+	}
+
+	if places[1].Emails == nil || len(places[1].Emails) != 0 {
+		t.Fatalf("a place with only a placeholder must end with no emails, got %#v", places[1].Emails)
+	}
+}
