@@ -683,7 +683,8 @@ func TestSendToHubMapsHubErrorsToFriendlyMessages(t *testing.T) {
 		{http.StatusServiceUnavailable, http.StatusBadGateway, "token do app"},
 		{http.StatusForbidden, http.StatusForbidden, "não tem acesso"},
 		{http.StatusInternalServerError, http.StatusBadGateway, "não respondeu"},
-		{http.StatusBadRequest, http.StatusBadGateway, "não respondeu"},
+		{http.StatusBadRequest, http.StatusBadGateway, "recusou o formato"},
+		{http.StatusRequestEntityTooLarge, http.StatusBadGateway, "recusou o formato"},
 	}
 
 	for _, tt := range tests {
@@ -801,5 +802,73 @@ func TestTicketKindAndAudienceFollowHubConvention(t *testing.T) {
 	// engenharia, expedicao_sso / expedicao); ours is "gmaps".
 	if hubTicketKind != "gmaps_sso" || hubTicketAudience != "gmaps" || hubTicketIssuer != "koria-hub" {
 		t.Fatalf("ticket contract changed: kind=%q aud=%q iss=%q", hubTicketKind, hubTicketAudience, hubTicketIssuer)
+	}
+}
+
+// The Hub refuses a whole batch for one value outside its limits, so the
+// scraper must shape every field before sending (see INT-40 §4 in the Hub repo).
+func TestBuildHubContactsRespectsTheHubLimits(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+
+	places := []Place{{
+		Title:    long(500),
+		Category: long(500),
+		Address:  long(500),
+		Phone:    long(100),
+		Website:  "https://" + long(600) + ".example", // too long: dropped, never cut
+		Link:     "https://www.google.com/maps/place/ok",
+		Emails: []string{
+			"ok1@x.example", "com espaco@x.example", long(300) + "@x.example", "semarroba",
+			"ok2@x.example", "ok3@x.example", "ok4@x.example", "ok5@x.example", "ok6@x.example",
+		},
+	}}
+
+	contacts, skipped := buildHubContacts(places)
+	if skipped != 0 || len(contacts) != 1 {
+		t.Fatalf("contacts=%d skipped=%d", len(contacts), skipped)
+	}
+
+	c := contacts[0]
+
+	for name, got := range map[string]struct {
+		value string
+		limit int
+	}{
+		"nome": {c.Name, hubMaxName}, "categoria": {c.Category, hubMaxCategory},
+		"endereco": {c.Address, hubMaxAddress}, "telefone": {c.Phone, hubMaxPhone},
+	} {
+		if n := len([]rune(got.value)); n == 0 || n > got.limit {
+			t.Fatalf("%s has %d chars, limit %d", name, n, got.limit)
+		}
+	}
+
+	if c.Website != "" {
+		t.Fatalf("a website over the limit must be dropped, got %d chars", len(c.Website))
+	}
+
+	if c.Link == "" {
+		t.Fatal("a valid link must be kept")
+	}
+
+	want := []string{"ok1@x.example", "ok2@x.example", "ok3@x.example", "ok4@x.example", "ok5@x.example"}
+	if len(c.Emails) != hubMaxEmails || strings.Join(c.Emails, ",") != strings.Join(want, ",") {
+		t.Fatalf("emails = %q, want the first %d valid ones", c.Emails, hubMaxEmails)
+	}
+}
+
+func TestBuildHubContactsDropsURLsWithWhitespaceAndKeepsContactless(t *testing.T) {
+	contacts, skipped := buildHubContacts([]Place{
+		{Title: "So site ruim", Website: "https://exemplo.com/a b"},
+		{Title: "Com telefone", Phone: "(54) 1"},
+		{Title: "", Phone: "1"},
+	})
+
+	// "So site ruim" ends with nothing usable, the unnamed place has no name.
+	if len(contacts) != 1 || contacts[0].Name != "Com telefone" || skipped != 2 {
+		t.Fatalf("contacts=%+v skipped=%d", contacts, skipped)
+	}
+
+	if contacts[0].Position != 2 {
+		t.Fatalf("position must keep the result-list index, got %d", contacts[0].Position)
 	}
 }

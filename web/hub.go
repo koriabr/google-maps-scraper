@@ -67,11 +67,17 @@ const (
 	hubContactsPath = "/api/minhas-tarefas/apps/gmaps/contatos/"
 	hubAccessPath   = "/api/apps/module-access/"
 
-	// Field limits, so one odd listing cannot make the whole batch invalid.
+	// Field limits of the Hub contract. The Hub validates strictly: one value
+	// over its limit refuses the whole batch, so we never send more than this.
 	hubMaxName     = 200
-	hubMaxText     = 300
+	hubMaxCategory = 120
+	hubMaxAddress  = 300
+	hubMaxPhone    = 50
+	hubMaxSite     = 500
 	hubMaxLink     = 1000
-	hubMaxEmails   = 10
+	hubMaxEmail    = 254
+	hubMaxEmails   = 5
+	hubMaxPosition = 1_000_000
 	hubMaxRespBody = 1 << 20
 )
 
