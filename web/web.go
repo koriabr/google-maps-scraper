@@ -49,7 +49,14 @@ func WithHub(cfg HubConfig) Option {
 			return nil
 		}
 
-		h, err := newHub(cfg)
+		// Use the repository's persistent store (sqlite) when it offers one,
+		// so used tickets and sessions survive a restart.
+		var store HubStore
+		if persistent, ok := s.svc.repo.(HubStore); ok {
+			store = persistent
+		}
+
+		h, err := newHub(cfg, store)
 		if err != nil {
 			return err
 		}

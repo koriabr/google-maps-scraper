@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,9 +32,9 @@ import (
 // Without the key the app behaves as before, with no login.
 
 const (
-	hubTicketKind     = "gmaps-sso"
+	hubTicketKind     = "gmaps_sso"
 	hubTicketIssuer   = "koria-hub"
-	hubTicketAudience = "gmaps-scraper"
+	hubTicketAudience = "gmaps"
 
 	// hubMinKeyBytes is the minimum size of the shared signing key.
 	hubMinKeyBytes = 32
@@ -43,7 +45,16 @@ const (
 	hubClockSkew = 30 * time.Second
 
 	hubSessionCookie = "gmaps_session"
-	hubSessionTTL    = 8 * time.Hour
+	// A session ends after hubSessionIdle without use, or hubSessionMax after
+	// it opened, whichever comes first (same limits as the Engenharia module).
+	hubSessionIdle = 8 * time.Hour
+	hubSessionMax  = 7 * 24 * time.Hour
+	// hubTouchEvery limits how often "last seen" is written.
+	hubTouchEvery = time.Minute
+
+	// hubTicketKeep is how long a used ticket id is remembered. The real replay
+	// window is hubTicketMaxTTL + hubClockSkew; this leaves a wide margin.
+	hubTicketKeep = 15 * time.Minute
 
 	// hubAccessRecheck is how long a "still has access" answer is trusted.
 	hubAccessRecheck = 5 * time.Minute
@@ -74,19 +85,16 @@ type HubConfig struct {
 	APIURL string
 	// AppToken is the "<slug>:<secret>" token sent as X-App-Token.
 	AppToken string
-	// SessionKey signs the session cookie; defaults to a key derived from SSOKey.
-	SessionKey string
 }
 
 // HubConfigFromEnv reads the integration settings from the environment:
-// HUB_SSO_SHARED_KEY, HUB_URL, HUB_API_URL, HUB_APP_TOKEN and HUB_SESSION_KEY.
+// HUB_SSO_SHARED_KEY, HUB_URL, HUB_API_URL and HUB_APP_TOKEN.
 func HubConfigFromEnv() HubConfig {
 	return HubConfig{
-		SSOKey:     strings.TrimSpace(os.Getenv("HUB_SSO_SHARED_KEY")),
-		URL:        strings.TrimRight(strings.TrimSpace(os.Getenv("HUB_URL")), "/"),
-		APIURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("HUB_API_URL")), "/"),
-		AppToken:   strings.TrimSpace(os.Getenv("HUB_APP_TOKEN")),
-		SessionKey: strings.TrimSpace(os.Getenv("HUB_SESSION_KEY")),
+		SSOKey:   strings.TrimSpace(os.Getenv("HUB_SSO_SHARED_KEY")),
+		URL:      strings.TrimRight(strings.TrimSpace(os.Getenv("HUB_URL")), "/"),
+		APIURL:   strings.TrimRight(strings.TrimSpace(os.Getenv("HUB_API_URL")), "/"),
+		AppToken: strings.TrimSpace(os.Getenv("HUB_APP_TOKEN")),
 	}
 }
 
@@ -109,10 +117,6 @@ func (c HubConfig) validate() error {
 		return fmt.Errorf("HUB_SSO_SHARED_KEY must have at least %d bytes", hubMinKeyBytes)
 	}
 
-	if c.SessionKey != "" && len(c.SessionKey) < hubMinKeyBytes {
-		return fmt.Errorf("HUB_SESSION_KEY must have at least %d bytes", hubMinKeyBytes)
-	}
-
 	for name, value := range map[string]string{"HUB_URL": c.URL, "HUB_API_URL": c.APIURL} {
 		if value != "" && !isHTTPURL(value) {
 			return fmt.Errorf("%s must be an http(s) URL", name)
@@ -132,25 +136,24 @@ func isHTTPURL(raw string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-// hubSession is the identity kept in the session cookie.
+// hubSession is the logged-in person, as seen by the handlers.
 type hubSession struct {
-	Username string `json:"u"`
-	Name     string `json:"n"`
-	Email    string `json:"e"`
-	Expires  int64  `json:"x"`
+	ID       string
+	Username string
+	Name     string
+	Email    string
 }
 
 type hubCtxKey struct{}
 
 // hub implements the Hub login, session and API calls.
 type hub struct {
-	cfg        HubConfig
-	sessionKey []byte
-	client     *http.Client
-	now        func() time.Time
+	cfg    HubConfig
+	store  HubStore
+	client *http.Client
+	now    func() time.Time
 
 	mu     sync.Mutex
-	usedID map[string]time.Time
 	access map[string]accessEntry
 }
 
@@ -159,25 +162,21 @@ type accessEntry struct {
 	checked time.Time
 }
 
-func newHub(cfg HubConfig) (*hub, error) {
+func newHub(cfg HubConfig, store HubStore) (*hub, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
-	sessionKey := []byte(cfg.SessionKey)
-	if len(sessionKey) == 0 {
-		mac := hmac.New(sha256.New, []byte(cfg.SSOKey))
-		mac.Write([]byte("gmaps-session-v1"))
-		sessionKey = mac.Sum(nil)
+	if store == nil {
+		store = newMemoryHubStore()
 	}
 
 	return &hub{
-		cfg:        cfg,
-		sessionKey: sessionKey,
-		client:     &http.Client{Timeout: hubSendTimeout},
-		now:        time.Now,
-		usedID:     make(map[string]time.Time),
-		access:     make(map[string]accessEntry),
+		cfg:    cfg,
+		store:  store,
+		client: &http.Client{Timeout: hubSendTimeout},
+		now:    time.Now,
+		access: make(map[string]accessEntry),
 	}, nil
 }
 
@@ -271,7 +270,8 @@ func (h *hub) checkClaims(claims *ticketClaims) error {
 		return fmt.Errorf("%w: missing iat/exp", errInvalidTicket)
 	}
 
-	if now.After(expires.Add(hubClockSkew)) {
+	// No tolerance on exp: it would widen the replay window.
+	if !now.Before(expires) {
 		return fmt.Errorf("%w: expired", errInvalidTicket)
 	}
 
@@ -304,71 +304,97 @@ func audienceMatches(raw json.RawMessage, want string) bool {
 	return false
 }
 
-// consumeTicketID records a ticket id; it returns false if it was used before.
-func (h *hub) consumeTicketID(id string, expires time.Time) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// openSession creates a server-side session for the person in a ticket and
+// returns the cookie value ("<id>.<secret>").
+func (h *hub) openSession(ctx context.Context, claims *ticketClaims) (string, error) {
+	name := strings.TrimSpace(claims.FirstName + " " + claims.LastName)
+	if name == "" {
+		name = claims.Username
+	}
+
+	id, err := randomToken(16)
+	if err != nil {
+		return "", err
+	}
+
+	secret, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
 
 	now := h.now()
-	for used, until := range h.usedID {
-		if now.After(until) {
-			delete(h.usedID, used)
-		}
+
+	err = h.store.CreateSession(ctx, HubSessionRecord{
+		ID:         id,
+		SecretHash: hashSecret(secret),
+		Username:   claims.Username,
+		Name:       name,
+		Email:      claims.Email,
+		CreatedAt:  now,
+		LastSeen:   now,
+		ExpiresAt:  now.Add(hubSessionMax),
+	})
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
 	}
 
-	if _, seen := h.usedID[id]; seen {
-		return false
+	// Housekeeping: a failure here never blocks a login.
+	if err := h.store.PurgeExpired(ctx, now); err != nil {
+		log.Printf("purge expired sessions: %v", err)
 	}
 
-	// Keep the id past the ticket's own expiry (plus skew) so it cannot be
-	// replayed while it would still validate.
-	h.usedID[id] = expires.Add(2 * hubClockSkew)
-
-	return true
+	return id + "." + secret, nil
 }
 
-func (h *hub) sign(payload []byte) string {
-	mac := hmac.New(sha256.New, h.sessionKey)
-	mac.Write(payload)
+func randomToken(size int) (string, error) {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("random token: %w", err)
+	}
 
-	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// readSession validates a session cookie value.
-func (h *hub) readSession(value string) (hubSession, bool) {
-	var session hubSession
+func hashSecret(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
 
-	payloadPart, sigPart, found := strings.Cut(value, ".")
-	if !found {
-		return session, false
-	}
+	return hex.EncodeToString(sum[:])
+}
 
-	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
-	if err != nil {
-		return session, false
-	}
-
-	signature, err := base64.RawURLEncoding.DecodeString(sigPart)
-	if err != nil {
-		return session, false
-	}
-
-	mac := hmac.New(sha256.New, h.sessionKey)
-	mac.Write(payload)
-
-	if subtle.ConstantTimeCompare(signature, mac.Sum(nil)) != 1 {
-		return session, false
-	}
-
-	if err := json.Unmarshal(payload, &session); err != nil {
-		return session, false
-	}
-
-	if session.Username == "" || h.now().Unix() >= session.Expires {
+// lookupSession validates a cookie value against the store: the secret must
+// match (constant time), and neither the idle nor the absolute limit may have
+// passed. Any failure just means "no session".
+func (h *hub) lookupSession(ctx context.Context, value string) (hubSession, bool) {
+	id, secret, found := strings.Cut(value, ".")
+	if !found || id == "" || secret == "" {
 		return hubSession{}, false
 	}
 
-	return session, true
+	rec, err := h.store.GetSession(ctx, id)
+	if err != nil {
+		if !errors.Is(err, ErrHubSessionNotFound) {
+			log.Printf("hub session lookup: %v", err)
+		}
+
+		return hubSession{}, false
+	}
+
+	if subtle.ConstantTimeCompare([]byte(hashSecret(secret)), []byte(rec.SecretHash)) != 1 {
+		return hubSession{}, false
+	}
+
+	now := h.now()
+	if !now.Before(rec.ExpiresAt) || now.Sub(rec.LastSeen) >= hubSessionIdle {
+		return hubSession{}, false
+	}
+
+	if now.Sub(rec.LastSeen) >= hubTouchEvery {
+		if err := h.store.TouchSession(ctx, id, now); err != nil {
+			log.Printf("hub session touch: %v", err)
+		}
+	}
+
+	return hubSession{ID: rec.ID, Username: rec.Username, Name: rec.Name, Email: rec.Email}, true
 }
 
 func (h *hub) sessionFromRequest(r *http.Request) (hubSession, bool) {
@@ -377,27 +403,15 @@ func (h *hub) sessionFromRequest(r *http.Request) (hubSession, bool) {
 		return hubSession{}, false
 	}
 
-	return h.readSession(cookie.Value)
+	return h.lookupSession(r.Context(), cookie.Value)
 }
 
-func (h *hub) setSessionCookie(w http.ResponseWriter, r *http.Request, claims ticketClaims) {
-	name := strings.TrimSpace(claims.FirstName + " " + claims.LastName)
-	if name == "" {
-		name = claims.Username
-	}
-
-	payload, _ := json.Marshal(hubSession{
-		Username: claims.Username,
-		Name:     name,
-		Email:    claims.Email,
-		Expires:  h.now().Add(hubSessionTTL).Unix(),
-	})
-
+func (h *hub) setSessionCookie(w http.ResponseWriter, r *http.Request, value string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     hubSessionCookie,
-		Value:    h.sign(payload),
+		Value:    value,
 		Path:     "/",
-		MaxAge:   int(hubSessionTTL.Seconds()),
+		MaxAge:   int(hubSessionMax.Seconds()),
 		HttpOnly: true,
 		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
@@ -511,9 +525,17 @@ func (s *Server) hubMiddleware(next http.Handler) http.Handler {
 
 		session, ok := s.hub.sessionFromRequest(r)
 		if ok && !s.hub.stillGranted(r.Context(), session.Username) {
-			s.hub.clearSessionCookie(w, r)
+			// The Hub withdrew access: end every session of the person.
+			if n, err := s.hub.store.RevokeUser(r.Context(), session.Username, s.hub.now()); err != nil {
+				log.Printf("hub revoke sessions: %v", err)
+			} else {
+				log.Printf("hub access withdrawn for %s: %d session(s) ended", session.Username, n)
+			}
 
-			ok = false
+			s.hub.clearSessionCookie(w, r)
+			s.renderHubLogin(w, r, "Seu acesso ao Google Maps Scraper foi retirado no Hub. Peça acesso à TI.")
+
+			return
 		}
 
 		if !ok {
@@ -578,8 +600,12 @@ func (s *Server) renderHubLogin(w http.ResponseWriter, r *http.Request, message 
 	_, _ = buf.WriteTo(w)
 }
 
-// hubSSO handles GET /sso?ticket=...: it validates the ticket, opens the
-// session and redirects to a URL without the ticket.
+// hubLoginRefused is the one message shown for every refused ticket: the real
+// reason goes to the log only, so nothing is revealed to someone probing.
+const hubLoginRefused = "Não foi possível entrar. Volte ao Hub e abra o Google Maps Scraper de novo."
+
+// hubSSO handles GET /sso?ticket=...: it validates the ticket, accepts its id
+// once, opens the session and redirects to a URL without the ticket.
 func (s *Server) hubSSO(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
@@ -592,20 +618,39 @@ func (s *Server) hubSSO(w http.ResponseWriter, r *http.Request) {
 
 	claims, err := s.hub.verifyTicket(r.URL.Query().Get("ticket"))
 	if err != nil {
-		log.Printf("sso rejected: %v", err)
-		s.renderHubLogin(w, r, "O link de acesso é inválido ou expirou. Volte ao Hub e abra o Google Maps Scraper de novo.")
+		log.Printf("sso refused: %v", err)
+		s.renderHubLogin(w, r, hubLoginRefused)
 
 		return
 	}
 
-	if !s.hub.consumeTicketID(claims.ID, time.Unix(int64(claims.ExpiresAt), 0)) {
-		log.Printf("sso rejected: ticket id already used")
-		s.renderHubLogin(w, r, "Este link de acesso já foi usado. Volte ao Hub e abra o Google Maps Scraper de novo.")
+	now := s.hub.now()
+
+	first, err := s.hub.store.ConsumeTicket(r.Context(), claims.ID, now, now.Add(hubTicketKeep))
+	if err != nil {
+		log.Printf("sso: ticket store: %v", err)
+		http.Error(w, "Serviço indisponível. Tente de novo em instantes.", http.StatusServiceUnavailable)
 
 		return
 	}
 
-	s.hub.setSessionCookie(w, r, claims)
+	if !first {
+		log.Printf("sso refused: ticket id already used")
+		s.renderHubLogin(w, r, hubLoginRefused)
+
+		return
+	}
+
+	cookie, err := s.hub.openSession(r.Context(), &claims)
+	if err != nil {
+		log.Printf("sso: %v", err)
+		http.Error(w, "Serviço indisponível. Tente de novo em instantes.", http.StatusServiceUnavailable)
+
+		return
+	}
+
+	log.Printf("sso login: %s", claims.Username)
+	s.hub.setSessionCookie(w, r, cookie)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -615,6 +660,12 @@ func (s *Server) hubLogout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
 
 		return
+	}
+
+	if session, ok := hubSessionFrom(r); ok {
+		if err := s.hub.store.RevokeSession(r.Context(), session.ID, s.hub.now()); err != nil {
+			log.Printf("hub logout: %v", err)
+		}
 	}
 
 	s.hub.clearSessionCookie(w, r)
