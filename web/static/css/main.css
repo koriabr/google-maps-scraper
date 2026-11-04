@@ -1089,6 +1089,130 @@ tbody tr:hover {
     color: hsl(var(--status-warning));
 }
 
+/* Aviso discreto quando o mapa cai para o modo simplificado (Leaflet/OSM). */
+.map-note {
+    margin: 0 0 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    border: 1px dashed hsl(var(--border-strong));
+    border-radius: calc(var(--radius) - 4px);
+}
+
+/* Pin laranja da marca (marcador do MapLibre). O botão global `button` tem
+   hover/ativo com fundo próprio, por isso os estados são zerados aqui. */
+.map-pin,
+.map-pin:hover,
+.map-pin:active {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+
+.map-pin-shape {
+    display: block;
+    width: 22px;
+    height: 22px;
+    margin: 0 3px 6px;
+    box-sizing: border-box;
+    background: hsl(var(--primary));
+    border: 2px solid hsl(var(--primary-foreground));
+    border-radius: 50% 50% 50% 0;
+    box-shadow: 0 1px 5px hsl(0 0% 0% / 0.5);
+    transform: rotate(-45deg);
+}
+
+.map-pin:focus-visible .map-pin-shape {
+    outline: 2px solid hsl(var(--foreground));
+    outline-offset: 2px;
+}
+
+/* Popups, controles e atribuição do MapLibre/Leaflet seguem o tema da página. */
+.map-modal .maplibregl-popup-content,
+.map-modal .leaflet-popup-content-wrapper,
+.map-modal .leaflet-popup-tip {
+    color: hsl(var(--popover-foreground));
+    background: hsl(var(--popover));
+    border: 1px solid hsl(var(--border-strong));
+    box-shadow: 0 4px 16px hsl(0 0% 0% / 0.35);
+}
+
+.map-modal .maplibregl-popup-content {
+    padding: 12px 14px;
+    border-radius: calc(var(--radius) - 2px);
+    font: inherit;
+    font-size: 13px;
+}
+
+/* A seta do popup tem uma regra por âncora no CSS do MapLibre (que carrega
+   depois deste arquivo), então cada uma é repetida aqui com a cor do popup. */
+.map-modal .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.map-modal .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.map-modal .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+    border-top-color: hsl(var(--popover));
+}
+
+.map-modal .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.map-modal .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.map-modal .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+    border-bottom-color: hsl(var(--popover));
+}
+
+.map-modal .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+    border-right-color: hsl(var(--popover));
+}
+
+.map-modal .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+    border-left-color: hsl(var(--popover));
+}
+
+.map-modal .place-popup strong {
+    display: block;
+    margin-bottom: 2px;
+}
+
+.map-modal .maplibregl-ctrl-group {
+    background: hsl(var(--popover));
+    border: 1px solid hsl(var(--border-strong));
+    box-shadow: none;
+}
+
+.map-modal .maplibregl-ctrl-group button,
+.map-modal .maplibregl-ctrl-group button:hover {
+    background: transparent;
+}
+
+.map-modal .maplibregl-ctrl-group button:hover {
+    background: hsl(var(--surface-hover));
+}
+
+/* Os ícones SVG dos controles são pretos; no tema escuro são invertidos. */
+:root:not(.light) .map-modal .maplibregl-ctrl-icon {
+    filter: invert(1);
+}
+
+.map-modal .maplibregl-ctrl-attrib,
+.map-modal .maplibregl-ctrl-attrib.maplibregl-compact {
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--popover) / 0.85);
+}
+
+.map-modal .maplibregl-ctrl-attrib a {
+    color: hsl(var(--foreground));
+}
+
+.map-modal .maplibregl-ctrl-attrib-button,
+.map-modal .maplibregl-ctrl-attrib-button:hover {
+    background-color: transparent;
+}
+
+:root:not(.light) .map-modal .maplibregl-ctrl-attrib-button {
+    filter: invert(1);
+}
+
 .map-loading,
 .map-empty,
 .map-error {

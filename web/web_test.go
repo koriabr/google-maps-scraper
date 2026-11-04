@@ -131,6 +131,27 @@ func TestSecurityHeadersAllowMapResources(t *testing.T) {
 			t.Fatalf("CSP missing %q: %s", want, csp)
 		}
 	}
+
+	// MapLibre fetches style, glyphs, sprites and tiles from OpenFreeMap, which
+	// is governed by connect-src; the OSM tiles of the Leaflet fallback by img-src.
+	directives := map[string]string{}
+
+	for _, part := range strings.Split(csp, ";") {
+		name, value, _ := strings.Cut(strings.TrimSpace(part), " ")
+		directives[name] = value
+	}
+
+	if !strings.Contains(directives["connect-src"], "https://tiles.openfreemap.org") {
+		t.Fatalf("connect-src must allow OpenFreeMap: %s", csp)
+	}
+
+	if !strings.Contains(directives["img-src"], "*.tile.openstreetmap.org") {
+		t.Fatalf("img-src must keep the OSM fallback tiles: %s", csp)
+	}
+
+	if !strings.Contains(directives["worker-src"], "blob:") {
+		t.Fatalf("worker-src must allow blob: for MapLibre workers: %s", csp)
+	}
 }
 
 func newTestServerWithRepo(t *testing.T, repo JobRepository) *Server {

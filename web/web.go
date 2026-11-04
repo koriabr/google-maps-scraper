@@ -839,7 +839,9 @@ func securityHeaders(next http.Handler) http.Handler {
 				"style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; "+
 				"img-src 'self' data: cdn.redoc.ly cdnjs.cloudflare.com *.tile.openstreetmap.org; "+
 				"font-src 'self' fonts.gstatic.com; "+
-				"connect-src 'self'")
+				// MapLibre fetches the style, glyphs, sprites and vector tiles
+				// from OpenFreeMap with fetch(), so they need connect-src.
+				"connect-src 'self' https://tiles.openfreemap.org")
 
 		next.ServeHTTP(w, r)
 	})
