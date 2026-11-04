@@ -14,14 +14,10 @@
     --orange-text: 17 88% 40%;
 }
 
-/* Fundo de destaque laranja (status em execução, local escolhido). No tema
-   claro o tom do pacote (10%) pesa demais sobre o branco e vira salmão. */
+/* Fundo de destaque laranja (status em execução, local escolhido): o mesmo
+   --brand-orange-soft do Hub nos dois temas. */
 :root {
     --orange-tint: 18 100% 50% / 0.10;
-}
-
-:root.light {
-    --orange-tint: 18 100% 50% / 0.06;
 }
 
 *,

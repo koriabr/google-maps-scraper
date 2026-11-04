@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/gosom/google-maps-scraper/internal/mailfilter"
 )
 
 // ErrPlacesNotFound is returned by GetPlaces when the job's CSV output does not
@@ -147,7 +149,10 @@ func splitEmails(cell string) []string {
 
 	for _, part := range strings.Split(cell, ",") {
 		part = strings.TrimSpace(part)
-		if part != "" {
+
+		// Results saved before the extractor filtered placeholders may still
+		// carry "seuemail@email.com"; never show or send those.
+		if part != "" && !mailfilter.IsPlaceholder(part) {
 			emails = append(emails, part)
 		}
 	}
