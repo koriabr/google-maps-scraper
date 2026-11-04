@@ -13,7 +13,7 @@ func renderJobView(t *testing.T, places []Place) string {
 	srv := newTestServer(t, t.TempDir())
 	rec := httptest.NewRecorder()
 
-	if err := srv.tmpl["static/templates/job_view.html"].Execute(rec, places); err != nil {
+	if err := srv.tmpl["static/templates/job_view.html"].Execute(rec, jobViewData{JobID: "11111111-1111-1111-1111-111111111111", Places: places}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 

@@ -6,11 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gosom/google-maps-scraper/internal/cnpj"
 )
 
 type Service struct {
 	repo       JobRepository
 	dataFolder string
+
+	// companies persists CNPJ lookups and the CNPJ linked to each place; cnpj
+	// queries the registry API.
+	companies CompanyStore
+	cnpj      CNPJLooker
 }
 
 type jobCounter interface {
@@ -18,9 +25,20 @@ type jobCounter interface {
 }
 
 func NewService(repo JobRepository, dataFolder string) *Service {
+	// Use the repository's persistent store (sqlite) when it offers one, so
+	// cached lookups and CNPJ links survive a restart.
+	var companies CompanyStore = newMemoryCompanyStore()
+	if persistent, ok := repo.(CompanyStore); ok {
+		companies = persistent
+	}
+
 	return &Service{
 		repo:       repo,
 		dataFolder: dataFolder,
+		companies:  companies,
+		// CNPJ_API_URL points to BrasilAPI by default; any service with the
+		// same response shape (e.g. a self-hosted Minha Receita) works.
+		cnpj: cnpj.NewClient(os.Getenv("CNPJ_API_URL")),
 	}
 }
 

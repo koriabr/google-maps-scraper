@@ -11,7 +11,8 @@
     </div>
     <script>
     (function () {
-        var places = {{ . }};
+        var places = {{ .Places }};
+        var jobId = {{ .JobID }};
 
         // MapLibre GL JS (vector map, WebGL) is the main renderer. The version is
         // pinned on purpose: upgrade it by hand, never to a floating tag. The
@@ -252,6 +253,14 @@
             var emails = (place.emails || []).filter(isEmail);
             if (emails.length) { lines.push('E-mail: ' + emails.join(', ')); }
             if (place.link) { lines.push('Google Maps: ' + place.link); }
+            var c = place.company;
+            if (c) {
+                lines.push('Razão social: ' + c.razao_social);
+                lines.push('CNPJ: ' + c.cnpj_formatado);
+                lines.push('Situação: ' + c.situacao);
+                if (c.cnae) { lines.push('CNAE: ' + c.cnae); }
+                if (c.porte) { lines.push('Porte: ' + c.porte); }
+            }
             return lines.join('\n');
         }
 
@@ -297,6 +306,172 @@
             return button;
         }
 
+
+        // ───────── CNPJ: dados da Receita ligados a cada empresa ─────────
+
+        function el(tag, className, text) {
+            var node = document.createElement(tag);
+            if (className) { node.className = className; }
+            if (text !== undefined) { node.textContent = text; }
+            return node;
+        }
+
+        // 2016-04-18 -> 04/2016
+        function monthYear(iso) {
+            var m = /^(\d{4})-(\d{2})/.exec(iso || '');
+            return m ? m[2] + '/' + m[1] : '';
+        }
+
+        function sentenceCase(text) {
+            text = String(text || '').toLowerCase();
+            return text.charAt(0).toUpperCase() + text.slice(1);
+        }
+
+        // POST para /cnpj/set ou /cnpj/clear. O cabeçalho HX-Request é a prova de
+        // que a chamada veio desta página (um formulário de outro site não o envia).
+        function postCnpj(path, position, body) {
+            return fetch(path + '?id=' + encodeURIComponent(jobId) + '&pos=' + position, {
+                method: 'POST',
+                headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body || ''
+            }).then(function (response) {
+                if (!response.ok) {
+                    return response.text().then(function (text) {
+                        throw new Error(text.trim() || 'Não foi possível consultar o CNPJ.');
+                    });
+                }
+                return response.json();
+            });
+        }
+
+        function companyDetails(c) {
+            var box = el('div', 'company-details');
+
+            var head = el('div', 'company-line');
+            head.appendChild(el('strong', 'company-name', '🏢 ' + c.razao_social));
+            box.appendChild(head);
+
+            var idLine = el('div', 'company-line');
+            idLine.appendChild(el('span', '', 'CNPJ ' + c.cnpj_formatado));
+            idLine.appendChild(el('span', 'company-status ' + (c.ativa ? 'is-active' : 'is-inactive'), sentenceCase(c.situacao)));
+            box.appendChild(idLine);
+
+            var facts = [];
+            if (c.porte) { facts.push(sentenceCase(c.porte)); }
+            if (c.mei) { facts.push('MEI'); }
+            if (c.abertura) {
+                facts.push('aberta em ' + monthYear(c.abertura) + (c.anos ? ' (' + c.anos + (c.anos === 1 ? ' ano)' : ' anos)') : ')'));
+            }
+            if (facts.length) { box.appendChild(el('div', 'company-line company-muted', facts.join(' · '))); }
+            if (c.cnae) { box.appendChild(el('div', 'company-line company-muted', 'CNAE ' + c.cnae)); }
+
+            // O CNPJ foi digitado por uma pessoa: avisa se a Receita discorda do Maps.
+            var checks = [];
+            if (c.cidade_confere === true) { checks.push('cidade'); }
+            if (c.telefone_confere === true) { checks.push('telefone'); }
+            if (checks.length) { box.appendChild(el('div', 'company-line company-ok', '✓ Confere com o Maps: ' + checks.join(' e '))); }
+            if (c.cidade_confere === false) {
+                box.appendChild(el('div', 'company-line company-warn', '⚠ A cidade do CNPJ (' + c.local + ') não aparece no endereço do Maps. Confira se é a empresa certa.'));
+            }
+            // Empresas têm vários telefones: se a cidade confere, um telefone diferente
+            // não é sinal de CNPJ errado. Só avisa quando a cidade também não bate.
+            if (c.telefone_confere === false && c.cidade_confere !== true) {
+                box.appendChild(el('div', 'company-line company-warn', '⚠ O telefone do CNPJ é diferente do telefone do Maps.'));
+            }
+            return box;
+        }
+
+        // Formulário em linha para informar ou trocar o CNPJ.
+        function cnpjForm(place, onDone, onCancel) {
+            var form = el('form', 'company-form');
+            var input = el('input');
+            input.type = 'text';
+            input.inputMode = 'numeric';
+            input.autocomplete = 'off';
+            input.maxLength = 18;
+            input.placeholder = '00.000.000/0000-00';
+            input.setAttribute('aria-label', 'CNPJ de ' + place.title);
+
+            var submit = el('button', 'button-sm', 'Consultar');
+            submit.type = 'submit';
+            var cancel = el('button', 'button-ghost button-sm', 'Cancelar');
+            cancel.type = 'button';
+            var message = el('div', 'company-error');
+            message.setAttribute('role', 'alert');
+
+            form.appendChild(input);
+            form.appendChild(submit);
+            form.appendChild(cancel);
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                message.textContent = '';
+                submit.disabled = true;
+                submit.textContent = 'Consultando…';
+
+                postCnpj('/cnpj/set', place.position, 'cnpj=' + encodeURIComponent(input.value))
+                    .then(function (company) {
+                        place.company = company;
+                        onDone();
+                    })
+                    .catch(function (error) {
+                        message.textContent = error.message;
+                        submit.disabled = false;
+                        submit.textContent = 'Consultar';
+                    });
+            });
+            cancel.addEventListener('click', onCancel);
+
+            var wrap = el('div');
+            wrap.appendChild(form);
+            wrap.appendChild(message);
+            setTimeout(function () { input.focus(); }, 0);
+            return wrap;
+        }
+
+        // Bloco da empresa de um item da lista: dados da Receita ou o convite
+        // para informar o CNPJ. `refresh` redesenha o item e o resumo.
+        function companyBlock(place, refresh) {
+            var box = el('div', 'place-company');
+            // Nada aqui deve mover o mapa.
+            box.addEventListener('click', function (event) { event.stopPropagation(); });
+
+            var showForm = function () {
+                box.textContent = '';
+                box.appendChild(cnpjForm(place, refresh, function () { refresh(); }));
+            };
+
+            if (!place.company) {
+                var add = el('button', 'button-ghost button-sm company-add', 'Informar CNPJ');
+                add.type = 'button';
+                add.addEventListener('click', showForm);
+                box.appendChild(add);
+                return box;
+            }
+
+            box.appendChild(companyDetails(place.company));
+
+            var actions = el('div', 'company-actions');
+            var change = el('button', 'company-link', 'Alterar');
+            change.type = 'button';
+            change.addEventListener('click', showForm);
+
+            var remove = el('button', 'company-link', 'Remover');
+            remove.type = 'button';
+            remove.addEventListener('click', function () {
+                remove.disabled = true;
+                postCnpj('/cnpj/clear', place.position).then(function () {
+                    place.company = null;
+                    refresh();
+                }).catch(function () { remove.disabled = false; });
+            });
+
+            actions.appendChild(change);
+            actions.appendChild(remove);
+            box.appendChild(actions);
+            return box;
+        }
+
         function placeListItem(place, onSelect) {
             var item = document.createElement('div');
             item.className = 'place-item';
@@ -312,6 +487,16 @@
                 item.insertBefore(row, rating);
             });
 
+            // Company (CNPJ) block, redrawn in place when the CNPJ changes.
+            var slot = el('div', 'place-company-slot');
+            var redraw = function () {
+                slot.textContent = '';
+                slot.appendChild(companyBlock(place, redraw));
+                updateSummary();
+            };
+            slot.appendChild(companyBlock(place, redraw));
+            item.insertBefore(slot, rating);
+
             item.addEventListener('click', onSelect);
             // Clicar em telefone, site ou e-mail não deve mover o mapa.
             item.querySelectorAll('a').forEach(function (link) {
@@ -320,22 +505,37 @@
             return item;
         }
 
-        // Resumo no topo da lista: quantos lugares têm cada tipo de contato.
+        // Resumo no topo da lista: contatos e CNPJs encontrados.
+        var summaryNode = null;
+
         function summaryEl() {
             var count = function (test) { return places.filter(test).length; };
             var withPhone = count(function (p) { return !!p.phone; });
             var withSite = count(function (p) { return !!safeHttpUrl(p.website); });
             var withEmail = count(function (p) { return (p.emails || []).some(isEmail); });
+            var withCnpj = count(function (p) { return !!p.company; });
+            var active = count(function (p) { return !!p.company && p.company.ativa; });
 
             var el = document.createElement('div');
             el.className = 'place-summary';
             el.innerHTML = '<strong>' + places.length + ' lugares</strong>' +
                 '<span>☎ ' + withPhone + ' · 🌐 ' + withSite + ' · ✉ ' + withEmail + '</span>' +
+                '<span>🏢 CNPJ: ' + withCnpj + ' de ' + places.length + (withCnpj ? ' · ativas: ' + active : '') + '</span>' +
                 (withEmail === 0
                     ? '<small>Nenhum e-mail coletado. Marque “Buscar e-mails” ao criar a pesquisa.</small>'
                     : '') +
+                (withCnpj === 0
+                    ? '<small>Informe o CNPJ de uma empresa para ver situação, CNAE e porte.</small>'
+                    : '') +
                 '<small>O CSV traz todas as colunas.</small>';
             return el;
+        }
+
+        function updateSummary() {
+            if (!summaryNode || !summaryNode.parentNode) { return; }
+            var fresh = summaryEl();
+            summaryNode.parentNode.replaceChild(fresh, summaryNode);
+            summaryNode = fresh;
         }
 
         // The orange pin is styled in main.css (.map-pin) from the brand tokens.
@@ -496,7 +696,8 @@
                 return;
             }
 
-            listEl.appendChild(summaryEl());
+            summaryNode = summaryEl();
+            listEl.appendChild(summaryNode);
 
             places.forEach(function (place) {
                 var handle = map.addPlace(place);

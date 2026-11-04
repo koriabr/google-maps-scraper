@@ -49,11 +49,26 @@ func (repo *repo) Create(ctx context.Context, job *web.Job) error {
 }
 
 func (repo *repo) Delete(ctx context.Context, id string) error {
-	const q = `DELETE FROM jobs WHERE id = ?`
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
 
-	_, err := repo.db.ExecContext(ctx, q, id)
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
-	return err
+	// A deleted job takes its CNPJ links with it. The cached lookups stay: they
+	// describe public registry data, not the job.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM place_cnpj WHERE job_id = ?`, id); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (repo *repo) Select(ctx context.Context, params web.SelectParams) ([]web.Job, error) {
@@ -268,6 +283,25 @@ func createSchema(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_hub_sessions_username
 			ON hub_sessions (username);
+
+		-- CNPJ enrichment: cached lookups (one row per number, shared by every
+		-- job) and the CNPJ linked to each place of a job.
+		CREATE TABLE IF NOT EXISTS cnpj_lookups (
+			cnpj TEXT PRIMARY KEY,
+			status TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			fetched_at INT NOT NULL,
+			expires_at INT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS place_cnpj (
+			job_id TEXT NOT NULL,
+			position INT NOT NULL,
+			cnpj TEXT NOT NULL,
+			source TEXT NOT NULL,
+			created_at INT NOT NULL,
+			PRIMARY KEY (job_id, position)
+		);
 	`)
 
 	return err

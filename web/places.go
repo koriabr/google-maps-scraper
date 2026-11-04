@@ -20,6 +20,10 @@ var ErrPlacesNotFound = errors.New("places not found")
 
 // Place is a single map-able result extracted from a job's CSV output.
 type Place struct {
+	// Position is the place's 1-based index in the job's result list. It is
+	// stable for a finished job and identifies the place for the Hub send and
+	// for the CNPJ link.
+	Position  int     `json:"position"`
 	Title     string  `json:"title"`
 	Address   string  `json:"address"`
 	Latitude  float64 `json:"latitude"`
@@ -31,6 +35,8 @@ type Place struct {
 	// Emails are only present when the job ran with "fetch emails" enabled.
 	Emails       []string `json:"emails"`
 	ReviewRating float64  `json:"review_rating"`
+	// Company is the registry data linked to this place (nil when none).
+	Company *CompanyView `json:"company"`
 }
 
 // GetPlaces locates the job's CSV output and parses it into mappable places.
@@ -125,6 +131,7 @@ func parsePlaces(r io.Reader) ([]Place, error) {
 		}
 
 		places = append(places, Place{
+			Position:     len(places) + 1,
 			Title:        get(row, "title"),
 			Address:      get(row, "address"),
 			Latitude:     lat,
