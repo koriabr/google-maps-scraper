@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -135,7 +136,6 @@ func New(svc *Service, addr string) (*Server, error) {
 	tmplsKeys := []string{
 		"static/templates/index.html",
 		"static/templates/job_rows.html",
-		"static/templates/job_row.html",
 		"static/templates/job_view.html",
 		"static/templates/redoc.html",
 	}
@@ -246,14 +246,16 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Name:     "",
 		MaxTime:  "10m",
 		Keywords: []string{},
-		Language: "en",
+		Language: "pt",
 		Zoom:     15,
 		FastMode: false,
 		Radius:   10000,
-		Lat:      "0",
-		Lon:      "0",
-		Depth:    10,
-		Email:    false,
+		// Lat/Lon stay empty on purpose: when set, every search is anchored to
+		// that point on the map, and 0,0 is open ocean (no results).
+		Lat:   "",
+		Lon:   "",
+		Depth: 10,
+		Email: false,
 	}
 
 	_ = tmpl.Execute(w, data)
@@ -268,98 +270,12 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 
 	err := r.ParseForm()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Não foi possível ler o formulário.", http.StatusBadRequest)
 
 		return
 	}
 
-	newJob := Job{
-		ID:     uuid.NewV4().String(),
-		Name:   r.Form.Get("name"),
-		Date:   time.Now().UTC(),
-		Status: StatusPending,
-		Data:   JobData{},
-	}
-
-	maxTimeStr := r.Form.Get("maxtime")
-
-	maxTime, err := time.ParseDuration(maxTimeStr)
-	if err != nil {
-		http.Error(w, "invalid max time", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	if maxTime < time.Minute*3 {
-		http.Error(w, "max time must be more than 3m", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	newJob.Data.MaxTime = maxTime
-
-	keywordsStr, ok := r.Form["keywords"]
-	if !ok {
-		http.Error(w, "missing keywords", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	keywords := strings.Split(keywordsStr[0], "\n")
-	for _, k := range keywords {
-		k = strings.TrimSpace(k)
-		if k == "" {
-			continue
-		}
-
-		newJob.Data.Keywords = append(newJob.Data.Keywords, k)
-	}
-
-	newJob.Data.Lang = r.Form.Get("lang")
-
-	newJob.Data.Zoom, err = strconv.Atoi(r.Form.Get("zoom"))
-	if err != nil {
-		http.Error(w, "invalid zoom", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	if r.Form.Get("fastmode") == "on" {
-		newJob.Data.FastMode = true
-	}
-
-	newJob.Data.Radius, err = strconv.Atoi(r.Form.Get("radius"))
-	if err != nil {
-		http.Error(w, "invalid radius", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	newJob.Data.Lat = r.Form.Get("latitude")
-	newJob.Data.Lon = r.Form.Get("longitude")
-
-	newJob.Data.Depth, err = strconv.Atoi(r.Form.Get("depth"))
-	if err != nil {
-		http.Error(w, "invalid depth", http.StatusUnprocessableEntity)
-
-		return
-	}
-
-	newJob.Data.Email = r.Form.Get("email") == "on"
-
-	proxies := strings.Split(r.Form.Get("proxies"), "\n")
-	if len(proxies) > 0 {
-		for _, p := range proxies {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
-
-			newJob.Data.Proxies = append(newJob.Data.Proxies, p)
-		}
-	}
-
-	err = newJob.Validate()
+	newJob, err := jobFromForm(r.Form)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 
@@ -368,13 +284,160 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 
 	err = s.svc.Create(r.Context(), &newJob)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("create job: %v", err)
+		http.Error(w, "Não foi possível salvar a pesquisa. Tente novamente.", http.StatusInternalServerError)
 
 		return
 	}
 
 	if err := s.renderJobsPage(r.Context(), w, 1); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// formError is a validation message meant to be shown to the person filling
+// the web form (pt-BR, capitalized, with punctuation).
+type formError string
+
+func (e formError) Error() string { return string(e) }
+
+// jobFromForm builds and validates a Job from the web form. Errors are
+// user-facing messages (pt-BR).
+func jobFromForm(form url.Values) (Job, error) {
+	newJob := Job{
+		ID:     uuid.NewV4().String(),
+		Name:   strings.TrimSpace(form.Get("name")),
+		Date:   time.Now().UTC(),
+		Status: StatusPending,
+		Data:   JobData{},
+	}
+
+	maxTime, err := time.ParseDuration(strings.TrimSpace(form.Get("maxtime")))
+	if err != nil {
+		return Job{}, formError("Tempo máximo inválido. Use um valor como 10m ou 1h.")
+	}
+
+	if maxTime < time.Minute*3 {
+		return Job{}, formError("O tempo máximo deve ser de pelo menos 3m.")
+	}
+
+	newJob.Data.MaxTime = maxTime
+	newJob.Data.Keywords = splitLines(form.Get("keywords"))
+
+	if len(newJob.Data.Keywords) == 0 {
+		return Job{}, formError("Informe ao menos uma palavra-chave, uma por linha.")
+	}
+
+	if newJob.Name == "" {
+		newJob.Name = defaultJobName(newJob.Data.Keywords)
+	}
+
+	newJob.Data.Lang = strings.TrimSpace(form.Get("lang"))
+	newJob.Data.FastMode = form.Get("fastmode") == "on"
+	newJob.Data.Email = form.Get("email") == "on"
+	newJob.Data.Proxies = splitLines(form.Get("proxies"))
+
+	if err := parseFormNumbers(form, &newJob.Data); err != nil {
+		return Job{}, err
+	}
+
+	if err := parseFormCoordinates(form, &newJob.Data); err != nil {
+		return Job{}, err
+	}
+
+	if err := newJob.Validate(); err != nil {
+		return Job{}, translateValidationError(err)
+	}
+
+	return newJob, nil
+}
+
+func parseFormNumbers(form url.Values, data *JobData) error {
+	var err error
+
+	data.Zoom, err = strconv.Atoi(strings.TrimSpace(form.Get("zoom")))
+	if err != nil {
+		return formError("Zoom inválido. Use um número inteiro.")
+	}
+
+	data.Radius, err = strconv.Atoi(strings.TrimSpace(form.Get("radius")))
+	if err != nil {
+		return formError("Raio inválido. Use um número inteiro, em metros.")
+	}
+
+	data.Depth, err = strconv.Atoi(strings.TrimSpace(form.Get("depth")))
+	if err != nil {
+		return formError("Profundidade inválida. Use um número inteiro.")
+	}
+
+	return nil
+}
+
+// parseFormCoordinates reads the optional latitude/longitude pair. Both empty
+// means "search without anchoring to a point"; a half-filled pair or an
+// out-of-range value is rejected instead of silently searching somewhere else.
+func parseFormCoordinates(form url.Values, data *JobData) error {
+	lat := strings.TrimSpace(form.Get("latitude"))
+	lon := strings.TrimSpace(form.Get("longitude"))
+
+	if lat == "" && lon == "" {
+		return nil
+	}
+
+	if lat == "" || lon == "" {
+		return formError("Informe latitude e longitude juntas, ou deixe as duas em branco.")
+	}
+
+	latitude, err := strconv.ParseFloat(lat, 64)
+	if err != nil || latitude < -90 || latitude > 90 {
+		return formError("Latitude inválida. Use um valor entre -90 e 90.")
+	}
+
+	longitude, err := strconv.ParseFloat(lon, 64)
+	if err != nil || longitude < -180 || longitude > 180 {
+		return formError("Longitude inválida. Use um valor entre -180 e 180.")
+	}
+
+	data.Lat = lat
+	data.Lon = lon
+
+	return nil
+}
+
+// splitLines returns the trimmed, non-empty lines of text.
+func splitLines(text string) []string {
+	var lines []string
+
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		lines = append(lines, line)
+	}
+
+	return lines
+}
+
+// translateValidationError maps Job.Validate errors (shared with the JSON API,
+// hence in English) to messages for the web form.
+func translateValidationError(err error) error {
+	switch err.Error() {
+	case "missing keywords":
+		return formError("Informe ao menos uma palavra-chave, uma por linha.")
+	case "missing lang":
+		return formError("Informe o idioma (2 letras, ex.: pt).")
+	case "invalid lang":
+		return formError("Idioma inválido. Use o código de 2 letras, ex.: pt ou en.")
+	case "missing depth":
+		return formError("Informe a profundidade (maior que zero).")
+	case "missing max time":
+		return formError("Informe o tempo máximo da pesquisa.")
+	case "missing geo coordinates":
+		return formError("O modo rápido exige latitude e longitude.")
+	default:
+		return err
 	}
 }
 
@@ -389,8 +452,13 @@ func (s *Server) renderJobsPage(ctx context.Context, w io.Writer, page int) erro
 		return fmt.Errorf("list jobs: %w", err)
 	}
 
+	active, err := s.svc.ActiveJobs(ctx)
+	if err != nil {
+		return fmt.Errorf("list active jobs: %w", err)
+	}
+
 	var output bytes.Buffer
-	if err := tmpl.Execute(&output, jobPage); err != nil {
+	if err := tmpl.Execute(&output, newJobsView(jobPage, active, time.Now())); err != nil {
 		return fmt.Errorf("render jobs: %w", err)
 	}
 
@@ -707,7 +775,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' cdn.redoc.ly cdnjs.cloudflare.com 'unsafe-inline' 'unsafe-eval'; "+
+				"script-src 'self' cdnjs.cloudflare.com 'unsafe-inline' 'unsafe-eval'; "+
 				"worker-src 'self' blob:; "+
 				"style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; "+
 				"img-src 'self' data: cdn.redoc.ly cdnjs.cloudflare.com *.tile.openstreetmap.org; "+

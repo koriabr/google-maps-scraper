@@ -84,6 +84,57 @@ func (s *Service) ListJobs(ctx context.Context, page, limit int) (JobPage, error
 	return ans, nil
 }
 
+// ActiveJobs returns every job that is waiting to run or running, newest
+// first, regardless of pagination. It feeds the "running now" indicators.
+func (s *Service) ActiveJobs(ctx context.Context) ([]Job, error) {
+	var active []Job
+
+	for _, status := range []string{StatusWorking, StatusPending} {
+		jobs, err := s.repo.Select(ctx, SelectParams{Status: status})
+		if err != nil {
+			return nil, fmt.Errorf("select %s jobs: %w", status, err)
+		}
+
+		// Not every JobRepository honours the status filter, so keep only
+		// the jobs that really match.
+		for i := range jobs {
+			if jobs[i].Status == status {
+				active = append(active, jobs[i])
+			}
+		}
+	}
+
+	return active, nil
+}
+
+// FailInterruptedJobs marks every job still "working" as failed and returns
+// how many it changed. Call it once at startup, before the runner picks up new
+// work: a job left "working" by a previous process can never finish.
+func (s *Service) FailInterruptedJobs(ctx context.Context) (int, error) {
+	jobs, err := s.repo.Select(ctx, SelectParams{Status: StatusWorking})
+	if err != nil {
+		return 0, fmt.Errorf("select working jobs: %w", err)
+	}
+
+	count := 0
+
+	for i := range jobs {
+		if jobs[i].Status != StatusWorking {
+			continue
+		}
+
+		jobs[i].Status = StatusFailed
+
+		if err := s.repo.Update(ctx, &jobs[i]); err != nil {
+			return count, fmt.Errorf("fail job %s: %w", jobs[i].ID, err)
+		}
+
+		count++
+	}
+
+	return count, nil
+}
+
 func (s *Service) countJobs(ctx context.Context, params SelectParams) (int, error) {
 	if counter, ok := s.repo.(jobCounter); ok {
 		return counter.Count(ctx, params)

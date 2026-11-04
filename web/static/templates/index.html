@@ -1,161 +1,330 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Maps Scraper</title>
+    <title>Google Maps Scraper · Koria Hub</title>
+    <link rel="icon" type="image/png" href="/static/img/KORIA_Selo.png">
+    <link rel="apple-touch-icon" href="/static/img/KORIA_Selo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/css/koria.css">
     <link rel="stylesheet" href="/static/css/main.css">
+    <script>
+        // Aplica o tema salvo antes da primeira pintura (dark é o padrão).
+        try {
+            if (localStorage.getItem('koria-theme') === 'light') {
+                document.documentElement.classList.add('light');
+            }
+        } catch (e) { /* localStorage indisponível: segue no tema padrão */ }
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <header>
-            <h1>Google Maps Scraper</h1>
-            <nav>
-                <a href="/api/docs" target="_blank" rel="noopener noreferrer">API Documentation</a>
-            </nav>
-            <div class="github-section">
-                <p>If you find this tool useful, please consider starring our repository: </p>
-                <a href="https://github.com/gosom/google-maps-scraper" class="github-button">
-                <svg height="16" width="16" viewBox="0 0 16 16">
-                    <path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/>
-                  </svg>
-                  Star on GitHub
+    <div class="app-shell">
+        <aside class="app-sidebar" id="sidebar" aria-label="Navegação">
+            <a class="brand" href="/">
+                <img class="brand-logo-dark" src="/static/img/KORIA_Branco_OFICIAL.png" alt="KORIA">
+                <img class="brand-logo-light" src="/static/img/KORIA_Preto_OFICIAL.png" alt="" aria-hidden="true">
+                <span class="brand-tag">Hub</span>
+            </a>
+
+            <span class="side-label">Google Maps</span>
+            <nav class="side-nav" aria-label="Principal">
+                <a class="side-link is-active" href="#pesquisas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                    Pesquisas
                 </a>
-            </div>
-            <div id="sponsor-section" class="sponsor-section">
-    <button class="sponsor-close" onclick="hideSponsor()">
-        ×
-    </button>
-    <p class="sponsor-text">Support the ongoing maintenance and development of this project by becoming a sponsor. Your contribution helps ensure the tool's continued improvement and reliability.</p>
-    <a href="https://github.com/sponsors/gosom" class="sponsor-button" target="_blank" rel="noopener noreferrer">
-        <svg height="16" width="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 2.5C4.25 1.83696 4.67143 1.25 5.25 1.25C5.82857 1.25 6.25 1.83696 6.25 2.5C6.25 3.16304 5.82857 3.75 5.25 3.75C4.67143 3.75 4.25 3.16304 4.25 2.5ZM2.5 3.75C1.92143 3.75 1.5 3.16304 1.5 2.5C1.5 1.83696 1.92143 1.25 2.5 1.25C3.07857 1.25 3.5 1.83696 3.5 2.5C3.5 3.16304 3.07857 3.75 2.5 3.75ZM8 1.25C7.42143 1.25 7 1.83696 7 2.5C7 3.16304 7.42143 3.75 8 3.75C8.57857 3.75 9 3.16304 9 2.5C9 1.83696 8.57857 1.25 8 1.25ZM10.75 2.5C10.75 1.83696 11.1714 1.25 11.75 1.25C12.3286 1.25 12.75 1.83696 12.75 2.5C12.75 3.16304 12.3286 3.75 11.75 3.75C11.1714 3.75 10.75 3.16304 10.75 2.5ZM14.5 1.25C13.9214 1.25 13.5 1.83696 13.5 2.5C13.5 3.16304 13.9214 3.75 14.5 3.75C15.0786 3.75 15.5 3.16304 15.5 2.5C15.5 1.83696 15.0786 1.25 14.5 1.25ZM1.25 5.25C1.25 4.67143 1.83696 4.25 2.5 4.25C3.16304 4.25 3.75 4.67143 3.75 5.25C3.75 5.82857 3.16304 6.25 2.5 6.25C1.83696 6.25 1.25 5.82857 1.25 5.25ZM5.25 4.25C4.67143 4.25 4.25 4.67143 4.25 5.25C4.25 5.82857 4.67143 6.25 5.25 6.25C5.82857 6.25 6.25 5.82857 6.25 5.25C6.25 4.67143 5.82857 4.25 5.25 4.25ZM7 5.25C7 4.67143 7.42143 4.25 8 4.25C8.57857 4.25 9 4.67143 9 5.25C9 5.82857 8.57857 6.25 8 6.25C7.42143 6.25 7 5.82857 7 5.25ZM11.75 4.25C11.1714 4.25 10.75 4.67143 10.75 5.25C10.75 5.82857 11.1714 6.25 11.75 6.25C12.3286 6.25 12.75 5.82857 12.75 5.25C12.75 4.67143 12.3286 4.25 11.75 4.25ZM13.5 5.25C13.5 4.67143 13.9214 4.25 14.5 4.25C15.0786 4.25 15.5 4.67143 15.5 5.25C15.5 5.82857 15.0786 6.25 14.5 6.25C13.9214 6.25 13.5 5.82857 13.5 5.25ZM2.5 7.25C1.83696 7.25 1.25 7.67143 1.25 8.25C1.25 8.82857 1.83696 9.25 2.5 9.25C3.16304 9.25 3.75 8.82857 3.75 8.25C3.75 7.67143 3.16304 7.25 2.5 7.25ZM4.25 8.25C4.25 7.67143 4.67143 7.25 5.25 7.25C5.82857 7.25 6.25 7.67143 6.25 8.25C6.25 8.82857 5.82857 9.25 5.25 9.25C4.67143 9.25 4.25 8.82857 4.25 8.25ZM8 7.25C7.42143 7.25 7 7.67143 7 8.25C7 8.82857 7.42143 9.25 8 9.25C8.57857 9.25 9 8.82857 9 8.25C9 7.67143 8.57857 7.25 8 7.25ZM10.75 8.25C10.75 7.67143 11.1714 7.25 11.75 7.25C12.3286 7.25 12.75 7.67143 12.75 8.25C12.75 8.82857 12.3286 9.25 11.75 9.25C11.1714 9.25 10.75 8.82857 10.75 8.25ZM14.5 7.25C13.9214 7.25 13.5 7.67143 13.5 8.25C13.5 8.82857 13.9214 9.25 14.5 9.25C15.0786 9.25 15.5 8.82857 15.5 8.25C15.5 7.67143 15.0786 7.25 14.5 7.25Z" fill="currentColor"/>
-        </svg>
-        Sponsor on GitHub
-    </a>
-</div>
+                <a class="side-link" href="#nova-pesquisa" data-focus="keywords">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    Nova pesquisa
+                </a>
+            </nav>
 
-        </header>
-        <main>
-            <div class="sidebar">
-                <div id="error-container" class="error-message"></div>
-                <form 
-                    hx-post="/scrape" 
-                    hx-target="#job-tbody"
-                    hx-swap="outerHTML"
-                    hx-indicator="#spinner"
-                    hx-on::before-request="document.getElementById('error-container').innerHTML = ''"
-                    hx-on::after-request="if(!event.detail.successful) document.getElementById('error-container').innerHTML = event.detail.xhr.responseText"
-                >
-                    
-                    <fieldset>
-                        <legend>Job Details</legend>
-                        <div class="form-group">
-                            <label for="name">Job Name:</label>
-                            <input type="text" id="name" name="name" value="{{.Name}}">
-                        </div>
-                        <div class="form-group">
-                            <label for="keywords">Keywords:</label>
-                            <textarea id="keywords" name="keywords" rows="10">{{ .KeywordsString }}</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="lang">Language:</label>
-                            <input type="text" id="lang" name="lang" value="{{.Language}}">
-                        </div>
-                    </fieldset>
-                    
-                    <details class="expandable-section">
-                        <summary>Location Settings</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="zoom">Zoom:</label>
-                                <input type="number" id="zoom" name="zoom" value="{{.Zoom}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="latitude">Latitude:</label>
-                                <input type="number" step="0.000000000000001" id="latitude" name="latitude" value="{{.Lat}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="longitude">Longitude:</label>
-                                <input type="number" step="0.000000000000001" id="longitude" name="longitude" value="{{.Lon}}">
-                            </div>
-                        </fieldset>
-                    </details>
-                    
-                    <details class="expandable-section">
-                        <summary>Advanced Options</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="fastmode">Fast Mode (BETA):</label>
-                                <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
-                            </div>
-                            <div class="form-group">
-                                    <label for="radius">Radius (BETA):</label>
-                                    <input type="number" id="radius" name="radius" value="{{.Radius}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="depth">Depth:</label>
-                                <input type="number" step="1" id="depth" name="depth" value="{{.Depth}}">
-                            </div>
-                            <div class="form-group checkbox">
-                                <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
-                                <label for="email">Fetch Emails</label>
-                            </div>
-                            <div class="form-group">
-                                <label for="maxtime">Max job time:</label>
-                                <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}">
-                            </div>
-                        </fieldset>
-                    </details>
-                    <details class="expandable-section">
-                        <summary>Proxies</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="proxies">Proxies:(one per line)</label>
-                                <p class="text-muted"><small>Examples:<br>
-                                        <p>HTTPS proxy with username/password: https://username:password@myproxy.local:443<p>
-                                        <p>HTTP proxy with username/password: http://username:password@myproxy.local:443<p>
-                                        <p>SOCKS5 proxy without auth: socks5://127.0.0.1:8000</p>
-                                </p>
+            <span class="side-label">Desenvolvedores</span>
+            <nav class="side-nav" aria-label="Desenvolvedores">
+                <a class="side-link" href="/api/docs" target="_blank" rel="noopener noreferrer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+                    Documentação da API
+                </a>
+            </nav>
 
-                                <textarea id="proxies" name="proxies" rows="5">{{.ProxiesString}}</textarea>
+            <div class="side-spacer"></div>
+
+            <div class="side-footer">
+                <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro">
+                    <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                    <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-2.93 1.41-1.41m11.32-11.32 1.41-1.41M2 12h2m16 0h2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41"/></svg>
+                    Alternar tema
+                </button>
+            </div>
+        </aside>
+
+        <div class="app-main">
+            <header class="app-header">
+                <div class="header-title">
+                    <button type="button" class="menu-button" id="menu-button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    </button>
+                    <div>
+                        <h1>Google Maps Scraper</h1>
+                        <p class="subtitle">Extraia empresas e contatos do Google Maps.</p>
+                    </div>
+                </div>
+
+                <!-- Atualizado a cada consulta da lista (hx-swap-oob em /jobs). -->
+                <div id="run-status" class="run-status" role="status" aria-live="polite" data-active="0">
+                    <span class="dot" aria-hidden="true"></span>
+                    <span class="run-status-text">Verificando pesquisas…</span>
+                </div>
+            </header>
+
+            <main class="app-content">
+                <div class="layout-grid">
+                    <section id="nova-pesquisa" class="card" aria-labelledby="form-title">
+                        <div class="card-header">
+                            <div>
+                                <h2 id="form-title" class="card-title">Nova pesquisa</h2>
+                                <p class="card-desc">Digite o que você buscaria no Google Maps.</p>
                             </div>
-                        </fieldset>
-                    </details>
-                    
-                    <button type="submit">Start Scraping</button>
-                </form>
-            </div>
-            <div class="content">
-                <div id="spinner" class="spinner"></div>
-                <table id="job-table">
-                    <thead>
-                        <tr>
-                            <th>Job ID</th>
-                            <th>Job Name</th>
-                            <th>Job Date</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="job-tbody" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
-                        <!-- Job rows will be inserted here by HTMX -->
-                    </tbody>
-                </table>
-                <div id="pagination-container"></div>
-            </div>
-        </main>
+                        </div>
+                        <div class="card-body">
+                            <div id="error-container" class="alert alert-error error-message" role="alert"></div>
+                            <form id="scrape-form"
+                                  hx-post="/scrape"
+                                  hx-target="#jobs-region"
+                                  hx-swap="outerHTML">
+
+                                <div class="form-group">
+                                    <label for="keywords">Palavras-chave</label>
+                                    <textarea id="keywords" name="keywords" rows="5" required placeholder="restaurantes em Curitiba&#10;academias em São Paulo">{{ .KeywordsString }}</textarea>
+                                    <span class="hint">Uma pesquisa por linha, do jeito que você digitaria no Google Maps.</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="name">Nome da pesquisa <span class="optional">(opcional)</span></label>
+                                    <input type="text" id="name" name="name" value="{{.Name}}" placeholder="Se vazio, usamos a primeira palavra-chave">
+                                </div>
+
+                                <div class="field-row">
+                                    <div class="form-group">
+                                        <label for="lang">Idioma</label>
+                                        <input type="text" id="lang" name="lang" value="{{.Language}}" maxlength="2" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="depth">Profundidade</label>
+                                        <input type="number" step="1" min="1" id="depth" name="depth" value="{{.Depth}}">
+                                    </div>
+                                </div>
+
+                                <div class="check">
+                                    <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
+                                    <label for="email">Buscar e-mails
+                                        <span class="hint">Visita o site de cada empresa. Deixa a pesquisa mais lenta.</span>
+                                    </label>
+                                </div>
+
+                                <details class="expandable-section">
+                                    <summary>Localização</summary>
+                                    <div class="section-body">
+                                        <p class="hint">Opcional. Deixe em branco para pesquisar sem fixar um ponto no mapa. Se preencher, informe latitude e longitude.</p>
+                                        <div class="field-row">
+                                            <div class="form-group">
+                                                <label for="latitude">Latitude</label>
+                                                <input type="number" step="any" min="-90" max="90" id="latitude" name="latitude" value="{{.Lat}}" placeholder="-25.4284">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="longitude">Longitude</label>
+                                                <input type="number" step="any" min="-180" max="180" id="longitude" name="longitude" value="{{.Lon}}" placeholder="-49.2733">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="zoom">Zoom</label>
+                                            <input type="number" id="zoom" name="zoom" min="1" max="21" value="{{.Zoom}}">
+                                            <span class="hint">Só vale junto com latitude e longitude.</span>
+                                        </div>
+                                    </div>
+                                </details>
+
+                                <details class="expandable-section">
+                                    <summary>Opções avançadas</summary>
+                                    <div class="section-body">
+                                        <div class="check">
+                                            <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
+                                            <label for="fastmode">Modo rápido (beta)
+                                                <span class="hint">Exige latitude e longitude.</span>
+                                            </label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="radius">Raio, em metros (beta)</label>
+                                            <input type="number" id="radius" name="radius" value="{{.Radius}}">
+                                            <span class="hint">Só vale no modo rápido.</span>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="maxtime">Tempo máximo da pesquisa</label>
+                                            <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}">
+                                            <span class="hint">Ex.: 10m ou 1h. Mínimo de 3m.</span>
+                                        </div>
+                                    </div>
+                                </details>
+
+                                <details class="expandable-section">
+                                    <summary>Proxies</summary>
+                                    <div class="section-body">
+                                        <div class="form-group">
+                                            <label for="proxies">Proxies <span class="optional">(um por linha)</span></label>
+                                            <textarea id="proxies" name="proxies" rows="4" placeholder="socks5://127.0.0.1:8000">{{.ProxiesString}}</textarea>
+                                            <span class="hint">Formatos: https://usuario:senha@proxy.local:443, http://usuario:senha@proxy.local:443 ou socks5://127.0.0.1:8000.</span>
+                                        </div>
+                                    </div>
+                                </details>
+
+                                <button type="submit" class="button-block">
+                                    <span class="spinner htmx-indicator" aria-hidden="true"></span>
+                                    Iniciar pesquisa
+                                </button>
+                            </form>
+                        </div>
+                    </section>
+
+                    <div class="stack">
+                        <!-- Preenchido pelo hx-swap-oob de /jobs: só aparece com pesquisa em execução. -->
+                        <div id="active-panel"></div>
+
+                        <section id="pesquisas" class="card" aria-labelledby="jobs-title">
+                            <div class="card-header">
+                                <div>
+                                    <h2 id="jobs-title" class="card-title">Pesquisas</h2>
+                                    <p class="card-desc">Acompanhe o andamento e baixe os resultados.</p>
+                                </div>
+                                <span id="jobs-count" class="count-pill" hidden></span>
+                            </div>
+                            <div id="jobs-region" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
+                                <div class="empty-state">Carregando pesquisas…</div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </main>
+        </div>
     </div>
 
     <div id="map-modal-container"></div>
-<script>
-function hideSponsor() {
-    const sponsorSection = document.getElementById('sponsor-section');
-    if (sponsorSection) {
-        sponsorSection.style.display = 'none';
-    }
-}
-</script>
+    <div id="toast-region" aria-live="polite"></div>
+
+    <script>
+    (function () {
+        var baseTitle = document.title;
+        var errorBox = document.getElementById('error-container');
+        var form = document.getElementById('scrape-form');
+        var sidebar = document.getElementById('sidebar');
+        var menuButton = document.getElementById('menu-button');
+
+        function toast(message, isError) {
+            var region = document.getElementById('toast-region');
+            var el = document.createElement('div');
+            el.className = 'toast';
+            if (isError) {
+                el.style.borderLeftColor = 'hsl(var(--destructive))';
+            }
+            el.textContent = message;
+            region.appendChild(el);
+            setTimeout(function () { el.remove(); }, 5000);
+        }
+
+        // Datas chegam em UTC; mostramos no fuso do navegador.
+        function localizeTimes() {
+            document.querySelectorAll('time[data-local]').forEach(function (el) {
+                var date = new Date(el.getAttribute('datetime'));
+                if (isNaN(date.getTime())) {
+                    return;
+                }
+                el.textContent = date.toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            });
+        }
+
+        // Mostra a quantidade de pesquisas em execução na aba do navegador.
+        function syncTitle() {
+            var status = document.getElementById('run-status');
+            var active = status ? parseInt(status.getAttribute('data-active'), 10) || 0 : 0;
+            document.title = active > 0 ? '(' + active + ') ' + baseTitle : baseTitle;
+        }
+
+        document.body.addEventListener('htmx:afterSettle', function () {
+            localizeTimes();
+            syncTitle();
+        });
+
+        // Formulário: limpa o erro ao enviar e confirma quando criou.
+        form.addEventListener('htmx:beforeRequest', function () {
+            errorBox.textContent = '';
+        });
+
+        form.addEventListener('htmx:afterRequest', function (event) {
+            if (event.detail.successful && event.target === form) {
+                toast('Pesquisa criada. Ela aparece em "Em execução" assim que começar.');
+            }
+        });
+
+        // Erros de validação (422) e falhas de rede aparecem no formulário;
+        // erros de outras ações (ex.: excluir) viram aviso.
+        document.body.addEventListener('htmx:responseError', function (event) {
+            var text = (event.detail.xhr.responseText || '').trim() || 'Algo deu errado. Tente novamente.';
+            if (event.detail.elt === form) {
+                errorBox.textContent = text;
+                errorBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                toast(text, true);
+            }
+        });
+
+        document.body.addEventListener('htmx:sendError', function (event) {
+            var text = 'Não foi possível falar com o servidor. Verifique a conexão.';
+            if (event.detail.elt === form) {
+                errorBox.textContent = text;
+            } else {
+                toast(text, true);
+            }
+        });
+
+        // Tema
+        document.getElementById('theme-toggle').addEventListener('click', function () {
+            var light = document.documentElement.classList.toggle('light');
+            try {
+                localStorage.setItem('koria-theme', light ? 'light' : 'dark');
+            } catch (e) { /* sem persistência: vale só nesta página */ }
+        });
+
+        // Menu lateral no celular
+        function setMenu(open) {
+            sidebar.classList.toggle('is-open', open);
+            menuButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+
+        menuButton.addEventListener('click', function () {
+            setMenu(!sidebar.classList.contains('is-open'));
+        });
+
+        sidebar.addEventListener('click', function (event) {
+            if (event.target.closest('a')) {
+                setMenu(false);
+            }
+        });
+
+        // "Nova pesquisa" leva o cursor direto ao campo de palavras-chave.
+        document.querySelectorAll('[data-focus]').forEach(function (link) {
+            link.addEventListener('click', function () {
+                var field = document.getElementById(link.getAttribute('data-focus'));
+                if (field) {
+                    setTimeout(function () { field.focus(); }, 0);
+                }
+            });
+        });
+    })();
+    </script>
 </body>
 </html>
