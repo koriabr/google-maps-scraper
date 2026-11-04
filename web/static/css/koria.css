@@ -1,102 +1,154 @@
 /*
  * KORIA design tokens (identidade visual do Koria Hub).
  *
- * Copia fiel de `koria-colors/src/css-vars.css` (spec v1.2) para uso sem build.
- * Dark é o tema padrão; o tema claro é ativado pela classe `.light` no <html>.
- * Valores em HSL sem `hsl()` — use sempre `hsl(var(--token))`.
+ * Cópia fiel de `frontend/src/design-system/koria-tokens.css` do repositório
+ * koriabr/intranet (design system v1.5, "handoff" oficial): é a FONTE DA VERDADE
+ * do visual atual do Hub. Atenção: o `REFERENCE.md` da skill koria-design ainda
+ * descreve a v1.2 (canvas escuro mais profundo e tema claro cinza-azulado) e não
+ * deve ser usado para os valores.
  *
- * Fonte da verdade: github.com/koriabr/koria-colors. Não edite os valores
- * aqui sem alterar o pacote.
+ * Dark é o tema padrão; o claro é ativado pela classe `.light` no <html> e é um
+ * BEGE QUENTE (família tan/bege), não cinza-azulado. Valores em HSL sem `hsl()` —
+ * use sempre `hsl(var(--token))`.
+ *
+ * Ao atualizar, compare com o arquivo do Hub; não edite os valores só aqui.
  */
 
 :root {
     --radius: 0.75rem;
+}
 
-    /* Superfícies e texto (dark) */
-    --background: 222 50% 5%;
+/* ───────── DARK (padrão). Em :root e .dark para os utilitários `dark:` ───────── */
+:root,
+.dark {
+    /* Base: canvas navy quase-preto (~#0a1018) */
+    --background: 222 47% 7%;
     --foreground: 0 0% 100% / 0.92;
-    --card: 0 0% 100% / 0.03;
+
+    /* Card (decorativo, translúcido) / Popover (funcional, opaco) */
+    --card: 0 0% 100% / 0.05;
     --card-foreground: 0 0% 100% / 0.92;
-    --popover: 222 40% 9%;
+    --popover: 222 30% 12%;
     --popover-foreground: 0 0% 100% / 0.92;
+
+    /* Marca */
     --primary: 18 100% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 100% / 0.04;
-    --secondary-foreground: 0 0% 100% / 0.92;
-    --muted: 0 0% 100% / 0.04;
-    --muted-foreground: 0 0% 100% / 0.55;
-    --accent: 18 100% 50%;
-    --destructive: 0 84% 60%;
-    --border: 0 0% 100% / 0.08;
-    --input: 0 0% 100% / 0.10;
-    --ring: 18 100% 50% / 0.12;
 
+    /* Secondary / Muted (funcionais, opacos) */
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 0 0% 100% / 0.92;
+    --muted: 220 15% 12%;
+    --muted-foreground: 0 0% 100% / 0.55;
+
+    --accent: 18 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Formulário (--input é a BORDA do campo, convenção shadcn) */
+    --border: 0 0% 100% / 0.12;
+    --input: 0 0% 100% / 0.14;
+    --ring: 18 100% 50% / 0.22;
+
+    /* Extras da marca */
     --brand-orange: 18 100% 50%;
     --brand-orange-hover: 16 100% 57%;
     --brand-orange-pressed: 19 100% 45%;
     --brand-orange-soft: 18 100% 50% / 0.10;
+    --brand-orange-dark: 18 100% 43%;
+    --brand-glow: 18 100% 50% / 0.12;
 
-    --surface: 0 0% 100% / 0.03;
-    --surface-hover: 0 0% 100% / 0.05;
-    --surface-active: 0 0% 100% / 0.07;
-    --surface-elevated: 0 0% 100% / 0.07;
-    --surface-glass: 0 0% 100% / 0.03;
-    --border-strong: 0 0% 100% / 0.12;
+    /* Superfícies (camadas) */
+    --surface: 0 0% 100% / 0.05;
+    --surface-hover: 0 0% 100% / 0.08;
+    --surface-active: 0 0% 100% / 0.11;
+    --surface-glass: 0 0% 100% / 0.05;
+    --surface-elevated: 0 0% 100% / 0.09;
+    --border-strong: 0 0% 100% / 0.18;
 
     --text-primary: 0 0% 100% / 0.92;
     --text-secondary: 0 0% 100% / 0.55;
     --text-muted: 0 0% 100% / 0.35;
 
-    --sidebar-background: 220 30% 11%;
+    /* Sidebar levitada (mais clara que o canvas, ~#161d27) */
+    --sidebar-background: 220 28% 13%;
     --sidebar-foreground: 0 0% 100% / 0.80;
     --sidebar-primary: 18 100% 50%;
-    --sidebar-accent: 0 0% 100% / 0.06;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 100% / 0.08;
     --sidebar-accent-foreground: 0 0% 100% / 0.96;
-    --sidebar-border: 0 0% 100% / 0.08;
+    --sidebar-border: 0 0% 100% / 0.12;
+    --sidebar-ring: 18 100% 50% / 0.12;
 
-    /* COLORS.status.* — valores únicos, sem escala (#10b981, #f59e0b, #3b82f6) */
-    --status-success: 160 84% 39%;
+    /* Status */
+    --success: 145 63% 49%;
+    --success-foreground: 0 0% 100%;
+    --warning: 18 100% 50%;
+    --info: 217 91% 60%;
+
+    /* Uso local: âmbar (#f59e0b do Hub) para "na fila", que no Hub `--warning`
+       é laranja e se confundiria com "executando". */
+    --status-success: var(--success);
     --status-warning: 38 92% 50%;
-    --status-info: 217 91% 60%;
+    --status-info: var(--info);
 
     color-scheme: dark;
 }
 
-:root.dark {
-    color-scheme: dark;
-}
-
+/* ───────── LIGHT (.light no <html>): canvas bege quente ───────── */
 :root.light {
-    --background: 210 20% 96%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --secondary: 210 20% 93%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 20% 93%;
-    --muted-foreground: 215 16% 40%;
-    --border: 220 15% 82%;
-    --input: 220 15% 82%;
-    --ring: 18 100% 50% / 0.25;
+    --background: 38 30% 88%;
+    --foreground: 30 26% 12%;
 
-    --surface: 0 0% 100%;
-    --surface-hover: 210 20% 95%;
-    --surface-active: 210 20% 93%;
-    --surface-elevated: 0 0% 98%;
-    --surface-glass: 0 0% 100% / 0.9;
-    --border-strong: 220 15% 72%;
+    --card: 38 34% 92%;
+    --card-foreground: 30 26% 12%;
+    --popover: 38 36% 95%;
+    --popover-foreground: 30 26% 12%;
 
-    --text-primary: 222 47% 11%;
-    --text-secondary: 215 16% 40%;
-    --text-muted: 215 16% 55%;
+    --primary: 18 100% 50%;
+    --primary-foreground: 0 0% 100%;
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 222 47% 11%;
-    --sidebar-accent: 210 20% 95%;
-    --sidebar-accent-foreground: 222 47% 11%;
-    --sidebar-border: 220 15% 88%;
+    --secondary: 36 26% 82%;
+    --secondary-foreground: 30 26% 12%;
+    --muted: 36 26% 82%;
+    --muted-foreground: 32 14% 34%;
+
+    --accent: 18 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 36 20% 70%;
+    --input: 36 20% 70%;
+    --ring: 18 100% 50% / 0.20;
+
+    --surface: 0 0% 0% / 0.03;
+    --surface-hover: 0 0% 0% / 0.045;
+    --surface-active: 0 0% 0% / 0.065;
+    --surface-glass: 38 36% 95% / 0.9;
+    --surface-elevated: 38 33% 92%;
+    --border-strong: 36 20% 58%;
+
+    --text-primary: 30 26% 12%;
+    --text-secondary: 32 14% 34%;
+    --text-muted: 32 12% 50%;
+
+    --sidebar-background: 38 36% 94%;
+    --sidebar-foreground: 30 26% 12%;
+    --sidebar-primary: 18 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 36 26% 82%;
+    --sidebar-accent-foreground: 30 26% 12%;
+    --sidebar-border: 36 20% 70%;
+    --sidebar-ring: 18 100% 50% / 0.20;
+
+    --success: 145 63% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 18 100% 50%;
+    --info: 217 91% 50%;
 
     color-scheme: light;
 }
