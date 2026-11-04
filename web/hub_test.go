@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -103,7 +104,6 @@ func TestHubConfigValidation(t *testing.T) {
 		{"bad api url", HubConfig{SSOKey: testSSOKey, APIURL: "ftp://x"}, "HUB_API_URL"},
 		{"bad hub url", HubConfig{SSOKey: testSSOKey, URL: "javascript:alert(1)"}, "HUB_URL"},
 		{"bad token", HubConfig{SSOKey: testSSOKey, AppToken: "nosecret"}, "HUB_APP_TOKEN"},
-		{"short session key", HubConfig{SSOKey: testSSOKey, SessionKey: "x"}, "HUB_SESSION_KEY"},
 		{"ok", HubConfig{SSOKey: testSSOKey, URL: "https://hub.example", APIURL: "http://hub:8000", AppToken: "gmaps:secret"}, ""},
 	}
 
@@ -122,7 +122,7 @@ func TestHubConfigValidation(t *testing.T) {
 }
 
 func TestVerifyTicketRejectsBadTickets(t *testing.T) {
-	h, err := newHub(HubConfig{SSOKey: testSSOKey})
+	h, err := newHub(HubConfig{SSOKey: testSSOKey}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestVerifyTicketRejectsBadTickets(t *testing.T) {
 }
 
 func TestVerifyTicketRejectsAlgNoneAndTamperedPayload(t *testing.T) {
-	h, _ := newHub(HubConfig{SSOKey: testSSOKey})
+	h, _ := newHub(HubConfig{SSOKey: testSSOKey}, nil)
 
 	payload, _ := json.Marshal(map[string]any{
 		"kind": hubTicketKind, "iss": hubTicketIssuer, "aud": hubTicketAudience, "jti": "x",
@@ -264,6 +264,18 @@ func TestSSOLoginFlow(t *testing.T) {
 		t.Fatalf("replayed ticket = %d, want 401", again.Code)
 	}
 
+	// Every refusal shows the same message: the reason is only in the log.
+	bad := httptest.NewRequest(http.MethodGet, "/sso?ticket=garbage", http.NoBody)
+	bad.Header.Set("Accept", "text/html")
+
+	replay := httptest.NewRequest(http.MethodGet, "/sso?ticket="+url.QueryEscape(ticket), http.NoBody)
+	replay.Header.Set("Accept", "text/html")
+
+	badBody, replayBody := serve(srv, bad).Body.String(), serve(srv, replay).Body.String()
+	if !strings.Contains(badBody, hubLoginRefused) || !strings.Contains(replayBody, hubLoginRefused) {
+		t.Fatal("bad and replayed tickets must show the same generic message")
+	}
+
 	// Logout clears the cookie and goes back to the Hub.
 	out := httptest.NewRequest(http.MethodPost, "/logout", http.NoBody)
 	out.AddCookie(cookie)
@@ -272,21 +284,28 @@ func TestSSOLoginFlow(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://hub.example" {
 		t.Fatalf("logout: %d -> %q", rec.Code, rec.Header().Get("Location"))
 	}
+
+	// Logout ends the session on the server: a copy of the old cookie is dead.
+	stolen := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
+	stolen.AddCookie(cookie)
+
+	if rec := serve(srv, stolen); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("cookie still works after logout: %d", rec.Code)
+	}
 }
 
-func TestSessionCookieCannotBeForgedOrExtended(t *testing.T) {
+func TestSessionCookieCannotBeForged(t *testing.T) {
 	srv := newHubServer(t, &statefulJobRepo{}, HubConfig{})
 	good := loginCookie(t, srv)
 
-	payloadPart, sigPart, _ := strings.Cut(good.Value, ".")
-
-	forgedPayload, _ := json.Marshal(hubSession{Username: "admin", Name: "Admin", Expires: time.Now().Add(100 * time.Hour).Unix()})
+	id, secret, _ := strings.Cut(good.Value, ".")
 
 	for name, value := range map[string]string{
-		"swapped payload": b64(forgedPayload) + "." + sigPart,
-		"no signature":    payloadPart,
-		"garbage":         "x.y",
-		"empty":           "",
+		"right id, wrong secret": id + ".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"unknown id":             "ffffffffffffffffffffff." + secret,
+		"no secret":              id,
+		"only dot":               ".",
+		"empty":                  "",
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
 		req.AddCookie(&http.Cookie{Name: hubSessionCookie, Value: value})
@@ -296,15 +315,67 @@ func TestSessionCookieCannotBeForgedOrExtended(t *testing.T) {
 		}
 	}
 
-	// An expired session is refused even with a valid signature.
-	h := srv.hub
-	h.now = func() time.Time { return time.Now().Add(hubSessionTTL + time.Minute) }
+	// The store keeps only a hash of the secret, never the secret itself.
+	rec, err := srv.hub.store.GetSession(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rec.SecretHash == secret || strings.Contains(rec.SecretHash, secret) {
+		t.Fatal("the store must hold a hash of the secret, not the secret")
+	}
+}
+
+func TestSessionIdleAndAbsoluteLimits(t *testing.T) {
+	srv := newHubServer(t, &statefulJobRepo{}, HubConfig{})
+	cookie := loginCookie(t, srv)
+	start := time.Now()
+
+	get := func(at time.Time) int {
+		srv.hub.now = func() time.Time { return at }
+
+		req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
+		req.AddCookie(cookie)
+
+		return serve(srv, req).Code
+	}
+
+	if code := get(start.Add(time.Minute)); code != http.StatusOK {
+		t.Fatalf("fresh session = %d", code)
+	}
+
+	// Idle: too long without use ends it (the clock restarts at each use).
+	if code := get(start.Add(time.Minute + hubSessionIdle - time.Second)); code != http.StatusOK {
+		t.Fatalf("just under the idle limit = %d", code)
+	}
+
+	if code := get(start.Add(time.Minute + 2*hubSessionIdle)); code != http.StatusUnauthorized {
+		t.Fatalf("idle session = %d, want 401", code)
+	}
+
+	// Absolute: constant use still ends after the maximum age.
+	srv2 := newHubServer(t, &statefulJobRepo{}, HubConfig{})
+	cookie2 := loginCookie(t, srv2)
+	now := time.Now()
+
+	for elapsed := time.Duration(0); elapsed < hubSessionMax; elapsed += hubSessionIdle / 2 {
+		srv2.hub.now = func() time.Time { return now.Add(elapsed) }
+
+		req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
+		req.AddCookie(cookie2)
+
+		if rec := serve(srv2, req); rec.Code != http.StatusOK {
+			t.Fatalf("active session ended early at %s: %d", elapsed, rec.Code)
+		}
+	}
+
+	srv2.hub.now = func() time.Time { return now.Add(hubSessionMax + time.Minute) }
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
-	req.AddCookie(good)
+	req.AddCookie(cookie2)
 
-	if rec := serve(srv, req); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expired session accepted: %d", rec.Code)
+	if rec := serve(srv2, req); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("session past absolute limit = %d, want 401", rec.Code)
 	}
 }
 
@@ -348,7 +419,7 @@ func TestRevokedAccessEndsSessionButHubOutageDoesNot(t *testing.T) {
 			return
 		}
 
-		_, _ = fmt.Fprintf(w, `{"username":%q,"module":"gmaps_scraper","exists":true,"is_active":true,"granted":%t}`, testUsername, granted.Load())
+		_, _ = fmt.Fprintf(w, `{"username":%q,"module":"gmaps","exists":true,"is_active":true,"granted":%t}`, testUsername, granted.Load())
 	}))
 	defer hubAPI.Close()
 
@@ -362,6 +433,10 @@ func TestRevokedAccessEndsSessionButHubOutageDoesNot(t *testing.T) {
 		return serve(srv, req).Code
 	}
 
+	// stale makes the cached "still has access" answer old, so the next
+	// request asks the Hub again.
+	stale := func() { srv.hub.access = map[string]accessEntry{} }
+
 	granted.Store(true)
 
 	if code := get(); code != http.StatusOK {
@@ -372,18 +447,42 @@ func TestRevokedAccessEndsSessionButHubOutageDoesNot(t *testing.T) {
 		t.Fatalf("hub call: token=%q path=%q", gotToken, gotPath)
 	}
 
-	// Revoked in the Hub: once the cached answer is stale, the session ends.
+	// Revoked in the Hub: the next check ends the session for good.
 	granted.Store(false)
+	stale()
 
-	srv.hub.now = func() time.Time { return time.Now().Add(hubAccessRecheck + time.Second) }
+	rec := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
+		req.AddCookie(cookie)
+		req.Header.Set("Accept", "text/html")
+		req.URL.Path = "/"
 
-	if code := get(); code != http.StatusUnauthorized {
-		t.Fatalf("revoked = %d, want 401", code)
+		return serve(srv, req)
+	}()
+
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "foi retirado no Hub") {
+		t.Fatalf("revoked = %d %q, want 401 saying access was withdrawn", rec.Code, rec.Body.String())
 	}
 
-	// Hub down: fail open (do not lock everyone out).
-	srv.hub.access = map[string]accessEntry{}
+	// Even if the Hub answers "granted" again, that old cookie stays dead: the
+	// session was ended on the server, not just hidden.
+	granted.Store(true)
+	stale()
+
+	if code := get(); code != http.StatusUnauthorized {
+		t.Fatalf("revoked session came back: %d", code)
+	}
+
+	// A new login (new ticket) once access is back works.
+	cookie = loginCookie(t, srv)
+
+	if code := get(); code != http.StatusOK {
+		t.Fatalf("after new login = %d", code)
+	}
+
+	// Hub down: fail open, nobody is locked out by an outage.
 	fail.Store(true)
+	stale()
 
 	if code := get(); code != http.StatusOK {
 		t.Fatalf("hub outage = %d, want 200 (fail open)", code)
@@ -584,7 +683,8 @@ func TestSendToHubMapsHubErrorsToFriendlyMessages(t *testing.T) {
 		{http.StatusServiceUnavailable, http.StatusBadGateway, "token do app"},
 		{http.StatusForbidden, http.StatusForbidden, "não tem acesso"},
 		{http.StatusInternalServerError, http.StatusBadGateway, "não respondeu"},
-		{http.StatusBadRequest, http.StatusBadGateway, "não respondeu"},
+		{http.StatusBadRequest, http.StatusBadGateway, "recusou o formato"},
+		{http.StatusRequestEntityTooLarge, http.StatusBadGateway, "recusou o formato"},
 	}
 
 	for _, tt := range tests {
@@ -633,5 +733,142 @@ func TestSendButtonOnlyWhenHubCanReceive(t *testing.T) {
 
 	if strings.Contains(serve(loginOnly, req).Body.String(), "hub/send") {
 		t.Fatal("no API/token configured: send button must be hidden")
+	}
+}
+
+func TestTicketAndSessionStateSurvivesARestart(t *testing.T) {
+	store := newMemoryHubStore()
+
+	build := func() *Server {
+		srv, err := New(NewService(&statefulJobRepo{}, t.TempDir()), ":0", WithHub(HubConfig{SSOKey: testSSOKey}))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		srv.hub.store = store // what a persistent repository provides
+
+		return srv
+	}
+
+	first := build()
+	ticket := mintTicket(t, testSSOKey, nil)
+
+	rec := serve(first, httptest.NewRequest(http.MethodGet, "/sso?ticket="+url.QueryEscape(ticket), http.NoBody))
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login = %d", rec.Code)
+	}
+
+	var cookie *http.Cookie
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == hubSessionCookie {
+			cookie = c
+		}
+	}
+
+	// A new process with the same store: the ticket is still "used" and the
+	// session still works.
+	second := build()
+
+	if rec := serve(second, httptest.NewRequest(http.MethodGet, "/sso?ticket="+url.QueryEscape(ticket), http.NoBody)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("ticket reused after restart = %d, want 401", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
+	req.AddCookie(cookie)
+
+	if rec := serve(second, req); rec.Code != http.StatusOK {
+		t.Fatalf("session lost after restart = %d", rec.Code)
+	}
+}
+
+func TestTicketExpiryHasNoClockTolerance(t *testing.T) {
+	h, _ := newHub(HubConfig{SSOKey: testSSOKey}, nil)
+	now := time.Now()
+
+	// Expired one second ago: refused (a grace period would widen replay).
+	ticket := mintTicket(t, testSSOKey, func(c map[string]any) {
+		c["iat"] = now.Add(-60 * time.Second).Unix()
+		c["exp"] = now.Add(-time.Second).Unix()
+	})
+
+	if _, err := h.verifyTicket(ticket); err == nil {
+		t.Fatal("ticket expired 1s ago must be refused")
+	}
+}
+
+func TestTicketKindAndAudienceFollowHubConvention(t *testing.T) {
+	// Hub satellites use kind "<slug>_sso" and aud "<slug>" (engenharia_sso /
+	// engenharia, expedicao_sso / expedicao); ours is "gmaps".
+	if hubTicketKind != "gmaps_sso" || hubTicketAudience != "gmaps" || hubTicketIssuer != "koria-hub" {
+		t.Fatalf("ticket contract changed: kind=%q aud=%q iss=%q", hubTicketKind, hubTicketAudience, hubTicketIssuer)
+	}
+}
+
+// The Hub refuses a whole batch for one value outside its limits, so the
+// scraper must shape every field before sending (see INT-40 §4 in the Hub repo).
+func TestBuildHubContactsRespectsTheHubLimits(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+
+	places := []Place{{
+		Title:    long(500),
+		Category: long(500),
+		Address:  long(500),
+		Phone:    long(100),
+		Website:  "https://" + long(600) + ".example", // too long: dropped, never cut
+		Link:     "https://www.google.com/maps/place/ok",
+		Emails: []string{
+			"ok1@x.example", "com espaco@x.example", long(300) + "@x.example", "semarroba",
+			"ok2@x.example", "ok3@x.example", "ok4@x.example", "ok5@x.example", "ok6@x.example",
+		},
+	}}
+
+	contacts, skipped := buildHubContacts(places)
+	if skipped != 0 || len(contacts) != 1 {
+		t.Fatalf("contacts=%d skipped=%d", len(contacts), skipped)
+	}
+
+	c := contacts[0]
+
+	for name, got := range map[string]struct {
+		value string
+		limit int
+	}{
+		"nome": {c.Name, hubMaxName}, "categoria": {c.Category, hubMaxCategory},
+		"endereco": {c.Address, hubMaxAddress}, "telefone": {c.Phone, hubMaxPhone},
+	} {
+		if n := len([]rune(got.value)); n == 0 || n > got.limit {
+			t.Fatalf("%s has %d chars, limit %d", name, n, got.limit)
+		}
+	}
+
+	if c.Website != "" {
+		t.Fatalf("a website over the limit must be dropped, got %d chars", len(c.Website))
+	}
+
+	if c.Link == "" {
+		t.Fatal("a valid link must be kept")
+	}
+
+	want := []string{"ok1@x.example", "ok2@x.example", "ok3@x.example", "ok4@x.example", "ok5@x.example"}
+	if len(c.Emails) != hubMaxEmails || strings.Join(c.Emails, ",") != strings.Join(want, ",") {
+		t.Fatalf("emails = %q, want the first %d valid ones", c.Emails, hubMaxEmails)
+	}
+}
+
+func TestBuildHubContactsDropsURLsWithWhitespaceAndKeepsContactless(t *testing.T) {
+	contacts, skipped := buildHubContacts([]Place{
+		{Title: "So site ruim", Website: "https://exemplo.com/a b"},
+		{Title: "Com telefone", Phone: "(54) 1"},
+		{Title: "", Phone: "1"},
+	})
+
+	// "So site ruim" ends with nothing usable, the unnamed place has no name.
+	if len(contacts) != 1 || contacts[0].Name != "Com telefone" || skipped != 2 {
+		t.Fatalf("contacts=%+v skipped=%d", contacts, skipped)
+	}
+
+	if contacts[0].Position != 2 {
+		t.Fatalf("position must keep the result-list index, got %d", contacts[0].Position)
 	}
 }

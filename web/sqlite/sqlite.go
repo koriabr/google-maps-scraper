@@ -247,6 +247,27 @@ func createSchema(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_jobs_created_at_id
 			ON jobs (created_at DESC, id DESC);
+
+		-- Koria Hub login: single-use ticket ids and server-side sessions.
+		CREATE TABLE IF NOT EXISTS hub_tickets (
+			jti TEXT PRIMARY KEY,
+			purge_at INT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS hub_sessions (
+			id TEXT PRIMARY KEY,
+			secret_hash TEXT,
+			username TEXT NOT NULL,
+			name TEXT NOT NULL,
+			email TEXT NOT NULL,
+			created_at INT NOT NULL,
+			last_seen INT NOT NULL,
+			expires_at INT NOT NULL,
+			revoked_at INT
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_hub_sessions_username
+			ON hub_sessions (username);
 	`)
 
 	return err

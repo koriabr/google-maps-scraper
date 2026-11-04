@@ -54,11 +54,6 @@ type hubSendResult struct {
 	TasksURL string `json:"url,omitempty"`
 }
 
-// hasContact reports whether a place has anything to contact it with.
-func hasContact(place *Place) bool {
-	return strings.TrimSpace(place.Phone) != "" || strings.TrimSpace(place.Website) != "" || len(place.Emails) > 0
-}
-
 func truncate(text string, limit int) string {
 	text = strings.TrimSpace(text)
 
@@ -70,20 +65,35 @@ func truncate(text string, limit int) string {
 	return string(runes[:limit-1]) + "…"
 }
 
-// onlyHTTP keeps a URL only when it is http(s); anything else is dropped.
-func onlyHTTP(raw string) string {
+// cleanURL keeps a URL only when the Hub would accept it: http(s), no
+// whitespace and within the limit. A value over the limit is dropped, never cut:
+// a truncated URL points somewhere else.
+func cleanURL(raw string, limit int) string {
 	raw = strings.TrimSpace(raw)
-	if isHTTPURL(raw) {
-		return truncate(raw, hubMaxLink)
+	if raw == "" || len([]rune(raw)) > limit || strings.ContainsAny(raw, " \t\r\n") || !isHTTPURL(raw) {
+		return ""
 	}
 
-	return ""
+	return raw
+}
+
+// cleanEmail keeps an e-mail only when it fits the Hub's rules (no whitespace,
+// within the limit); like URLs it is dropped rather than cut.
+func cleanEmail(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len([]rune(raw)) > hubMaxEmail || strings.ContainsAny(raw, " \t\r\n") || !strings.Contains(raw, "@") {
+		return ""
+	}
+
+	return raw
 }
 
 // buildHubContacts converts places to Hub contacts. The position is the place's
 // index in the job's result list (1-based) and does not change when places are
 // filtered out, so sending the same job again is idempotent on the Hub side.
-// Places with no phone, website or e-mail are skipped and counted.
+// Places with no usable phone, website or e-mail are skipped and counted.
+// Every value is shaped to the Hub's limits first: it refuses a whole batch for
+// one bad value.
 func buildHubContacts(places []Place) ([]hubContact, int) {
 	contacts := make([]hubContact, 0, len(places))
 	skipped := 0
@@ -91,31 +101,30 @@ func buildHubContacts(places []Place) ([]hubContact, int) {
 	for i := range places {
 		place := &places[i]
 
-		if !hasContact(place) || strings.TrimSpace(place.Title) == "" {
+		contact := hubContact{
+			Position: i + 1,
+			Name:     truncate(place.Title, hubMaxName),
+			Category: truncate(place.Category, hubMaxCategory),
+			Address:  truncate(place.Address, hubMaxAddress),
+			Phone:    truncate(place.Phone, hubMaxPhone),
+			Website:  cleanURL(place.Website, hubMaxSite),
+			Link:     cleanURL(place.Link, hubMaxLink),
+		}
+
+		for _, email := range place.Emails {
+			if cleaned := cleanEmail(email); cleaned != "" && len(contact.Emails) < hubMaxEmails {
+				contact.Emails = append(contact.Emails, cleaned)
+			}
+		}
+
+		if contact.Name == "" || contact.Position > hubMaxPosition ||
+			(contact.Phone == "" && contact.Website == "" && len(contact.Emails) == 0) {
 			skipped++
 
 			continue
 		}
 
-		emails := make([]string, 0, len(place.Emails))
-
-		for _, email := range place.Emails {
-			email = truncate(email, hubMaxText)
-			if email != "" && len(emails) < hubMaxEmails {
-				emails = append(emails, email)
-			}
-		}
-
-		contacts = append(contacts, hubContact{
-			Position: i + 1,
-			Name:     truncate(place.Title, hubMaxName),
-			Category: truncate(place.Category, hubMaxText),
-			Address:  truncate(place.Address, hubMaxText),
-			Phone:    truncate(place.Phone, hubMaxText),
-			Website:  onlyHTTP(place.Website),
-			Emails:   emails,
-			Link:     onlyHTTP(place.Link),
-		})
+		contacts = append(contacts, contact)
 	}
 
 	return contacts, skipped
@@ -126,6 +135,7 @@ var (
 	errHubUnavailable = formError("O Hub não respondeu agora. Tente de novo em instantes.")
 	errHubRefused     = formError("O Hub recusou o envio: sua conta não tem acesso a este recurso.")
 	errHubConfig      = formError("A integração com o Hub não está autorizada (token do app). Avise a TI.")
+	errHubRejected    = formError("O Hub recusou o formato dos dados desta pesquisa. Avise a TI.")
 )
 
 // sendContacts posts one batch to the Hub.
@@ -177,6 +187,11 @@ func (h *hub) sendContacts(ctx context.Context, req *hubSendRequest) (hubSendRes
 		return answer, errHubConfig
 	case resp.StatusCode == http.StatusForbidden:
 		return answer, errHubRefused
+	case resp.StatusCode == http.StatusBadRequest, resp.StatusCode == http.StatusRequestEntityTooLarge:
+		// A contract mismatch, not an outage: retrying will not help.
+		log.Printf("hub send rejected: status %d", resp.StatusCode)
+
+		return answer, errHubRejected
 	default:
 		// The body may echo contact data; log only the status.
 		log.Printf("hub send failed: status %d", resp.StatusCode)
