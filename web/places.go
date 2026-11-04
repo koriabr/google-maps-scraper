@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // ErrPlacesNotFound is returned by GetPlaces when the job's CSV output does not
@@ -17,15 +18,17 @@ var ErrPlacesNotFound = errors.New("places not found")
 
 // Place is a single map-able result extracted from a job's CSV output.
 type Place struct {
-	Title        string  `json:"title"`
-	Address      string  `json:"address"`
-	Latitude     float64 `json:"latitude"`
-	Longitude    float64 `json:"longitude"`
-	Link         string  `json:"link"`
-	Category     string  `json:"category"`
-	Phone        string  `json:"phone"`
-	Website      string  `json:"website"`
-	ReviewRating float64 `json:"review_rating"`
+	Title     string  `json:"title"`
+	Address   string  `json:"address"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Link      string  `json:"link"`
+	Category  string  `json:"category"`
+	Phone     string  `json:"phone"`
+	Website   string  `json:"website"`
+	// Emails are only present when the job ran with "fetch emails" enabled.
+	Emails       []string `json:"emails"`
+	ReviewRating float64  `json:"review_rating"`
 }
 
 // GetPlaces locates the job's CSV output and parses it into mappable places.
@@ -128,11 +131,28 @@ func parsePlaces(r io.Reader) ([]Place, error) {
 			Category:     get(row, "category"),
 			Phone:        get(row, "phone"),
 			Website:      get(row, "website"),
+			Emails:       splitEmails(get(row, "emails")),
 			ReviewRating: rating,
 		})
 	}
 
 	return places, nil
+}
+
+// splitEmails turns the CSV "emails" cell (comma-separated) into a clean list.
+// It always returns a non-nil slice so the JSON embedded in the map view is
+// [] rather than null.
+func splitEmails(cell string) []string {
+	emails := []string{}
+
+	for _, part := range strings.Split(cell, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			emails = append(emails, part)
+		}
+	}
+
+	return emails
 }
 
 // finite reports whether f is a usable, real number (not NaN or ±Inf).

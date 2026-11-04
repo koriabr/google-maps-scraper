@@ -1,8 +1,8 @@
 <div id="map-modal" class="map-modal" role="dialog" aria-modal="true" aria-labelledby="map-modal-title" onclick="if(event.target===this)closeJobMap()">
     <div class="map-modal-content">
         <div class="map-modal-header">
-            <h2 id="map-modal-title">Places</h2>
-            <button type="button" class="map-modal-close" aria-label="Close" onclick="closeJobMap()">&times;</button>
+            <h2 id="map-modal-title">Lugares encontrados</h2>
+            <button type="button" class="map-modal-close" aria-label="Fechar" onclick="closeJobMap()">&times;</button>
         </div>
         <div class="map-modal-body">
             <div id="job-map"></div>
@@ -64,29 +64,162 @@
             return map;
         }
 
+        // Só links http(s) viram <a>; telefone vira tel: apenas com dígitos.
+        function safeHttpUrl(url) {
+            return typeof url === 'string' && /^https?:\/\//i.test(url) ? encodeURI(url) : '';
+        }
+
+        function telHref(phone) {
+            var digits = String(phone || '').replace(/[^\d+]/g, '');
+            return digits ? 'tel:' + digits : '';
+        }
+
+        function isEmail(value) {
+            return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(value);
+        }
+
+        function websiteLabel(url) {
+            try {
+                return new URL(url).hostname.replace(/^www\./, '');
+            } catch (e) {
+                return url;
+            }
+        }
+
+        // Linhas de contato (telefone, site, e-mails) em HTML já escapado.
+        function contactLines(place) {
+            var lines = [];
+
+            if (place.phone) {
+                var tel = telHref(place.phone);
+                lines.push('<div class="place-contact">☎ ' + (tel
+                    ? '<a href="' + escapeHtml(tel) + '">' + escapeHtml(place.phone) + '</a>'
+                    : escapeHtml(place.phone)) + '</div>');
+            }
+
+            var site = safeHttpUrl(place.website);
+            if (site) {
+                lines.push('<div class="place-contact">🌐 <a href="' + escapeHtml(site) +
+                    '" target="_blank" rel="noopener noreferrer">' + escapeHtml(websiteLabel(place.website)) + '</a></div>');
+            }
+
+            (place.emails || []).filter(isEmail).forEach(function (email) {
+                lines.push('<div class="place-contact">✉ <a href="mailto:' + escapeHtml(email) + '">' +
+                    escapeHtml(email) + '</a></div>');
+            });
+
+            return lines.join('');
+        }
+
         function placePopup(place) {
             var parts = ['<strong>' + escapeHtml(place.title) + '</strong>'];
             if (place.address) {
                 parts.push(escapeHtml(place.address));
             }
+            var contacts = contactLines(place);
+            if (contacts) {
+                parts.push(contacts);
+            }
             if (place.link && /^https?:\/\//i.test(place.link)) {
-                parts.push('<a href="' + encodeURI(place.link) + '" target="_blank" rel="noopener noreferrer">View on Google Maps</a>');
+                parts.push('<a href="' + encodeURI(place.link) + '" target="_blank" rel="noopener noreferrer">Ver no Google Maps</a>');
             }
             return parts.join('<br>');
+        }
+
+        // Texto de uma empresa para colar em planilha, chat ou e-mail.
+        function placeAsText(place) {
+            var lines = [place.title];
+            if (place.category) { lines.push(place.category); }
+            if (place.address) { lines.push(place.address); }
+            if (place.phone) { lines.push('Telefone: ' + place.phone); }
+            if (place.website) { lines.push('Site: ' + place.website); }
+            var emails = (place.emails || []).filter(isEmail);
+            if (emails.length) { lines.push('E-mail: ' + emails.join(', ')); }
+            if (place.link) { lines.push('Google Maps: ' + place.link); }
+            return lines.join('\n');
+        }
+
+        // navigator.clipboard só existe em HTTPS/localhost; o Hub interno pode
+        // rodar em HTTP, então há um plano B com textarea + execCommand.
+        function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            return new Promise(function (resolve, reject) {
+                var area = document.createElement('textarea');
+                area.value = text;
+                area.setAttribute('readonly', '');
+                area.style.position = 'fixed';
+                area.style.opacity = '0';
+                document.body.appendChild(area);
+                area.select();
+                var ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                area.remove();
+                ok ? resolve() : reject(new Error('copy failed'));
+            });
+        }
+
+        function copyButton(place) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'button button-ghost button-sm place-copy';
+            button.textContent = 'Copiar';
+            button.setAttribute('aria-label', 'Copiar dados de ' + place.title);
+            var timer;
+            button.addEventListener('click', function (event) {
+                event.stopPropagation();
+                copyText(placeAsText(place)).then(function () {
+                    button.textContent = 'Copiado ✓';
+                }, function () {
+                    button.textContent = 'Não foi possível copiar';
+                }).finally(function () {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () { button.textContent = 'Copiar'; }, 1800);
+                });
+            });
+            return button;
         }
 
         function placeListItem(place, onSelect) {
             var item = document.createElement('div');
             item.className = 'place-item';
-            item.innerHTML = '<div class="place-title">' + escapeHtml(place.title) + '</div>' +
+            item.innerHTML = '<div class="place-head"><div class="place-title">' + escapeHtml(place.title) + '</div></div>' +
+                (place.category ? '<div class="place-category">' + escapeHtml(place.category) + '</div>' : '') +
                 (place.address ? '<div class="place-address">' + escapeHtml(place.address) + '</div>' : '') +
+                contactLines(place) +
                 (place.review_rating ? '<div class="place-rating">★ ' + escapeHtml(String(place.review_rating)) + '</div>' : '');
+            item.querySelector('.place-head').appendChild(copyButton(place));
             item.addEventListener('click', onSelect);
+            // Clicar em telefone, site ou e-mail não deve mover o mapa.
+            item.querySelectorAll('a').forEach(function (link) {
+                link.addEventListener('click', function (event) { event.stopPropagation(); });
+            });
             return item;
+        }
+
+        // Resumo no topo da lista: quantos lugares têm cada tipo de contato.
+        function summaryEl() {
+            var count = function (test) { return places.filter(test).length; };
+            var withPhone = count(function (p) { return !!p.phone; });
+            var withSite = count(function (p) { return !!safeHttpUrl(p.website); });
+            var withEmail = count(function (p) { return (p.emails || []).some(isEmail); });
+
+            var el = document.createElement('div');
+            el.className = 'place-summary';
+            el.innerHTML = '<strong>' + places.length + ' lugares</strong>' +
+                '<span>☎ ' + withPhone + ' · 🌐 ' + withSite + ' · ✉ ' + withEmail + '</span>' +
+                (withEmail === 0
+                    ? '<small>Nenhum e-mail coletado. Marque “Buscar e-mails” ao criar a pesquisa.</small>'
+                    : '') +
+                '<small>O CSV traz todas as colunas.</small>';
+            return el;
         }
 
         function renderPlaces(map, listEl) {
             var bounds = [];
+
+            listEl.appendChild(summaryEl());
 
             places.forEach(function (place) {
                 var latlng = [place.latitude, place.longitude];
@@ -103,7 +236,7 @@
         }
 
         function showEmptyState(map, listEl) {
-            listEl.innerHTML = '<p class="map-empty">No places with coordinates were found for this job.</p>';
+            listEl.innerHTML = '<p class="map-empty">Nenhum lugar com coordenadas foi encontrado nesta pesquisa.</p>';
             map.setView([0, 0], 2);
         }
 

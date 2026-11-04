@@ -33,11 +33,13 @@ type Server struct {
 	tmpl map[string]*template.Template
 	srv  *http.Server
 	svc  *Service
+	geo  Geocoder
 }
 
 func New(svc *Service, addr string) (*Server, error) {
 	ans := Server{
 		svc:  svc,
+		geo:  newNominatim(nominatimURL),
 		tmpl: make(map[string]*template.Template),
 		srv: &http.Server{
 			Addr:              addr,
@@ -70,6 +72,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.delete(w, r)
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
+	mux.HandleFunc("/geocode", ans.geocode)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 

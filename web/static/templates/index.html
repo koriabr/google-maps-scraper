@@ -125,24 +125,40 @@
                                     </label>
                                 </div>
 
-                                <details class="expandable-section">
+                                <details class="expandable-section" id="location-section">
                                     <summary>Localização</summary>
                                     <div class="section-body">
-                                        <p class="hint">Opcional. Deixe em branco para pesquisar sem fixar um ponto no mapa. Se preencher, informe latitude e longitude.</p>
+                                        <p class="hint">Opcional. Escolha uma cidade ou endereço para fixar a pesquisa nessa região. Sem isso, o Google Maps decide a região sozinho.</p>
+
+                                        <div class="form-group">
+                                            <label for="geo-query">Cidade ou endereço</label>
+                                            <div class="input-action">
+                                                <input type="text" id="geo-query" autocomplete="off" maxlength="200" placeholder="Caxias do Sul, RS">
+                                                <button type="button" id="geo-search" class="button-ghost">Buscar</button>
+                                            </div>
+                                            <div id="geo-status" class="hint" role="status" aria-live="polite"></div>
+                                            <div id="geo-results" class="geo-results" role="listbox" aria-label="Locais encontrados" hidden></div>
+                                            <div id="geo-selected" class="geo-selected" hidden>
+                                                <span id="geo-selected-name"></span>
+                                                <button type="button" id="geo-clear" class="button-ghost button-sm">Limpar</button>
+                                            </div>
+                                            <span class="hint">Busca por OpenStreetMap Nominatim · © colaboradores do OpenStreetMap.</span>
+                                        </div>
+
                                         <div class="field-row">
                                             <div class="form-group">
                                                 <label for="latitude">Latitude</label>
-                                                <input type="number" step="any" min="-90" max="90" id="latitude" name="latitude" value="{{.Lat}}" placeholder="-25.4284">
+                                                <input type="number" step="any" min="-90" max="90" id="latitude" name="latitude" value="{{.Lat}}" placeholder="-29.1685">
                                             </div>
                                             <div class="form-group">
                                                 <label for="longitude">Longitude</label>
-                                                <input type="number" step="any" min="-180" max="180" id="longitude" name="longitude" value="{{.Lon}}" placeholder="-49.2733">
+                                                <input type="number" step="any" min="-180" max="180" id="longitude" name="longitude" value="{{.Lon}}" placeholder="-51.1796">
                                             </div>
                                         </div>
                                         <div class="form-group">
                                             <label for="zoom">Zoom</label>
                                             <input type="number" id="zoom" name="zoom" min="1" max="21" value="{{.Zoom}}">
-                                            <span class="hint">Só vale junto com latitude e longitude.</span>
+                                            <span class="hint">Sugerido ao escolher uma cidade (menor = área maior). Só vale junto com latitude e longitude.</span>
                                         </div>
                                     </div>
                                 </details>
@@ -290,6 +306,106 @@
                 toast(text, true);
             }
         });
+
+        // Busca de cidade/endereço (Nominatim, via /geocode): preenche
+        // latitude, longitude e zoom. Sem autocompletar: só busca ao clicar
+        // em "Buscar" ou apertar Enter, como pede a política do serviço.
+        (function () {
+            var queryInput = document.getElementById('geo-query');
+            var searchButton = document.getElementById('geo-search');
+            var statusEl = document.getElementById('geo-status');
+            var resultsEl = document.getElementById('geo-results');
+            var selectedEl = document.getElementById('geo-selected');
+            var selectedName = document.getElementById('geo-selected-name');
+            var latInput = document.getElementById('latitude');
+            var lonInput = document.getElementById('longitude');
+            var zoomInput = document.getElementById('zoom');
+
+            function setStatus(text) {
+                statusEl.textContent = text;
+            }
+
+            function clearResults() {
+                resultsEl.textContent = '';
+                resultsEl.hidden = true;
+            }
+
+            function choose(place) {
+                latInput.value = place.lat;
+                lonInput.value = place.lon;
+                zoomInput.value = place.zoom;
+                selectedName.textContent = '📍 ' + place.name;
+                selectedEl.hidden = false;
+                clearResults();
+                setStatus('');
+            }
+
+            function showResults(places) {
+                clearResults();
+                if (!places.length) {
+                    setStatus('Nada encontrado. Tente incluir o estado, ex.: Caxias do Sul, RS.');
+                    return;
+                }
+                setStatus(places.length === 1 ? '1 local encontrado.' : places.length + ' locais encontrados. Escolha um:');
+                places.forEach(function (place) {
+                    var option = document.createElement('button');
+                    option.type = 'button';
+                    option.className = 'geo-result';
+                    option.setAttribute('role', 'option');
+                    option.textContent = place.name;
+                    option.addEventListener('click', function () { choose(place); });
+                    resultsEl.appendChild(option);
+                });
+                resultsEl.hidden = false;
+            }
+
+            function search() {
+                var query = queryInput.value.trim();
+                if (query.length < 3) {
+                    setStatus('Digite pelo menos 3 letras da cidade ou do endereço.');
+                    return;
+                }
+                clearResults();
+                setStatus('Buscando…');
+                searchButton.disabled = true;
+
+                fetch('/geocode?q=' + encodeURIComponent(query))
+                    .then(function (response) {
+                        if (!response.ok) {
+                            return response.text().then(function (text) { throw new Error(text.trim()); });
+                        }
+                        return response.json();
+                    })
+                    .then(showResults)
+                    .catch(function (error) {
+                        setStatus(error.message || 'Não foi possível buscar a localização agora.');
+                    })
+                    .finally(function () { searchButton.disabled = false; });
+            }
+
+            searchButton.addEventListener('click', search);
+
+            // Enter no campo busca a cidade em vez de enviar o formulário.
+            queryInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    search();
+                }
+            });
+
+            document.getElementById('geo-clear').addEventListener('click', function () {
+                latInput.value = '';
+                lonInput.value = '';
+                selectedEl.hidden = true;
+                queryInput.value = '';
+                queryInput.focus();
+            });
+
+            // Editar as coordenadas à mão invalida a cidade escolhida.
+            [latInput, lonInput].forEach(function (input) {
+                input.addEventListener('input', function () { selectedEl.hidden = true; });
+            });
+        })();
 
         // Tema
         document.getElementById('theme-toggle').addEventListener('click', function () {

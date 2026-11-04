@@ -4,6 +4,26 @@
  * tudo vem de hsl(var(--token)).
  */
 
+/* Laranja para TEXTO: o #fe5000 da marca tem ~3:1 sobre branco (abaixo do
+   mínimo de 4,5:1 para texto pequeno), então no claro usamos o tom 700. */
+:root {
+    --orange-text: 18 100% 50%;
+}
+
+:root.light {
+    --orange-text: 17 88% 40%;
+}
+
+/* Fundo de destaque laranja (status em execução, local escolhido). No tema
+   claro o tom do pacote (10%) pesa demais sobre o branco e vira salmão. */
+:root {
+    --orange-tint: 18 100% 50% / 0.10;
+}
+
+:root.light {
+    --orange-tint: 18 100% 50% / 0.06;
+}
+
 *,
 *::before,
 *::after {
@@ -106,8 +126,8 @@ a {
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: hsl(var(--primary));
-    background: hsl(var(--brand-orange-soft));
+    color: hsl(var(--orange-text));
+    background: hsl(var(--orange-tint));
 }
 
 .side-label {
@@ -372,10 +392,67 @@ input[type='checkbox'] {
     gap: 12px;
 }
 
+.input-action {
+    display: flex;
+    gap: 8px;
+}
+
+.input-action input {
+    flex: 1;
+    min-width: 0;
+}
+
+.geo-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.geo-result {
+    justify-content: flex-start;
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    border-color: hsl(var(--input));
+}
+
+.geo-result:hover {
+    color: hsl(var(--foreground));
+    background: hsl(var(--surface-active));
+    border-color: hsl(var(--primary));
+}
+
+.geo-selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid hsl(var(--primary) / 0.4);
+    border-radius: calc(var(--radius) - 2px);
+    background: hsl(var(--orange-tint));
+}
+
+.geo-selected[hidden],
+.geo-results[hidden] {
+    display: none;
+}
+
 .expandable-section {
     border: 1px solid hsl(var(--border));
     border-radius: calc(var(--radius) - 2px);
     background: hsl(var(--muted));
+}
+
+/* No claro, o fundo cinza da seção quase some contra os campos: só borda. */
+:root.light .expandable-section {
+    background: transparent;
 }
 
 .expandable-section summary {
@@ -608,7 +685,7 @@ form.htmx-request button[type='submit'] {
 
 .run-status.is-active {
     color: hsl(var(--foreground));
-    background: hsl(var(--brand-orange-soft));
+    background: hsl(var(--orange-tint));
     border-color: hsl(var(--primary) / 0.4);
 }
 
@@ -628,7 +705,7 @@ form.htmx-request button[type='submit'] {
 
 .active-panel {
     border-color: hsl(var(--primary) / 0.35);
-    background: hsl(var(--brand-orange-soft));
+    background: hsl(var(--orange-tint));
 }
 
 .active-list {
@@ -814,8 +891,8 @@ tbody tr:hover {
 }
 
 .status-working {
-    color: hsl(var(--primary));
-    background: hsl(var(--brand-orange-soft));
+    color: hsl(var(--orange-text));
+    background: hsl(var(--orange-tint));
     border-color: hsl(var(--primary) / 0.35);
 }
 
@@ -945,8 +1022,56 @@ tbody tr:hover {
     background: hsl(var(--surface-hover));
 }
 
+.place-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .place-title {
     font-weight: 600;
+}
+
+.place-copy {
+    flex: none;
+    min-width: 72px;
+}
+
+.place-category {
+    font-size: 12px;
+    color: hsl(var(--orange-text));
+}
+
+.place-contact {
+    margin-top: 2px;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.place-contact a {
+    color: hsl(var(--orange-text));
+    text-decoration: none;
+}
+
+.place-contact a:hover {
+    text-decoration: underline;
+}
+
+.place-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 0 8px;
+    padding: 10px;
+    font-size: 13px;
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 4px);
+    background: hsl(var(--muted));
+}
+
+.place-summary small {
+    color: hsl(var(--muted-foreground));
 }
 
 .place-address {
