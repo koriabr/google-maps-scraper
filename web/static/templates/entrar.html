@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrar · Google Maps Scraper · Koria Hub</title>
+    <link rel="icon" type="image/png" href="/static/img/KORIA_Selo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/css/koria.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script>
+        try {
+            if (localStorage.getItem('koria-theme') === 'light') {
+                document.documentElement.classList.add('light');
+            }
+        } catch (e) { /* sem localStorage: segue no tema padrão */ }
+    </script>
+</head>
+<body>
+    <main class="login-page">
+        <section class="card login-card">
+            <div class="brand login-brand">
+                <img class="brand-logo-dark" src="/static/img/KORIA_Branco_OFICIAL.png" alt="KORIA">
+                <img class="brand-logo-light" src="/static/img/KORIA_Preto_OFICIAL.png" alt="" aria-hidden="true">
+                <span class="brand-tag">Hub</span>
+            </div>
+            <h1>Google Maps Scraper</h1>
+            {{if .Message}}
+            <p class="alert alert-error" role="alert">{{.Message}}</p>
+            {{else}}
+            <p class="card-desc">O acesso é feito pelo Koria Hub, com o seu usuário. Abra o Hub e entre em <strong>Google Maps Scraper</strong>.</p>
+            {{end}}
+            {{if .HubURL}}
+            <a class="button button-block" href="{{.HubURL}}">Abrir o Koria Hub</a>
+            {{end}}
+            <p class="hint">Se o Hub não mostra este app para você, peça acesso à TI.</p>
+        </section>
+    </main>
+</body>
+</html>

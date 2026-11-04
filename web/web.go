@@ -33,11 +33,37 @@ type Server struct {
 	tmpl map[string]*template.Template
 	srv  *http.Server
 	svc  *Service
+	geo  Geocoder
+	hub  *hub // nil when Hub login is off
 }
 
-func New(svc *Service, addr string) (*Server, error) {
+// Option customises a Server.
+type Option func(*Server) error
+
+// WithHub turns on login through the Koria Hub (SSO ticket), the check that the
+// person still has access, and sending contacts to the Hub. A config without
+// an SSO key leaves the server unchanged (no login).
+func WithHub(cfg HubConfig) Option {
+	return func(s *Server) error {
+		if !cfg.Enabled() {
+			return nil
+		}
+
+		h, err := newHub(cfg)
+		if err != nil {
+			return err
+		}
+
+		s.hub = h
+
+		return nil
+	}
+}
+
+func New(svc *Service, addr string, opts ...Option) (*Server, error) {
 	ans := Server{
 		svc:  svc,
+		geo:  newNominatim(nominatimURL),
 		tmpl: make(map[string]*template.Template),
 		srv: &http.Server{
 			Addr:              addr,
@@ -47,6 +73,12 @@ func New(svc *Service, addr string) (*Server, error) {
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20,
 		},
+	}
+
+	for _, opt := range opts {
+		if err := opt(&ans); err != nil {
+			return nil, err
+		}
 	}
 
 	staticFS, err := fs.Sub(static, "static")
@@ -70,6 +102,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.delete(w, r)
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
+	mux.HandleFunc("/geocode", ans.geocode)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 
@@ -130,14 +163,28 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.download(w, r)
 	})
 
-	handler := securityHeaders(mux)
-	ans.srv.Handler = handler
+	var handler http.Handler = mux
+
+	if ans.hub != nil {
+		mux.HandleFunc("/sso", ans.hubSSO)
+		mux.HandleFunc("/logout", ans.hubLogout)
+		mux.HandleFunc("/hub/send", func(w http.ResponseWriter, r *http.Request) {
+			r = requestWithID(r)
+
+			ans.hubSend(w, r)
+		})
+
+		handler = ans.hubMiddleware(mux)
+	}
+
+	ans.srv.Handler = securityHeaders(handler)
 
 	tmplsKeys := []string{
 		"static/templates/index.html",
 		"static/templates/job_rows.html",
 		"static/templates/job_view.html",
 		"static/templates/redoc.html",
+		"static/templates/entrar.html",
 	}
 
 	for _, key := range tmplsKeys {
@@ -192,6 +239,10 @@ type formData struct {
 	Depth    int
 	Email    bool
 	Proxies  []string
+
+	// Koria Hub login (zero values when it is off).
+	HubUser string
+	HubURL  string
 }
 
 type ctxKey string
@@ -256,6 +307,14 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Lon:   "",
 		Depth: 10,
 		Email: false,
+	}
+
+	if s.hub != nil {
+		if session, ok := hubSessionFrom(r); ok {
+			data.HubUser = session.Name
+		}
+
+		data.HubURL = s.hub.cfg.URL
 	}
 
 	_ = tmpl.Execute(w, data)
@@ -458,7 +517,7 @@ func (s *Server) renderJobsPage(ctx context.Context, w io.Writer, page int) erro
 	}
 
 	var output bytes.Buffer
-	if err := tmpl.Execute(&output, newJobsView(jobPage, active, time.Now())); err != nil {
+	if err := tmpl.Execute(&output, s.newJobsView(jobPage, active, time.Now())); err != nil {
 		return fmt.Errorf("render jobs: %w", err)
 	}
 
@@ -780,7 +839,9 @@ func securityHeaders(next http.Handler) http.Handler {
 				"style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; "+
 				"img-src 'self' data: cdn.redoc.ly cdnjs.cloudflare.com *.tile.openstreetmap.org; "+
 				"font-src 'self' fonts.gstatic.com; "+
-				"connect-src 'self'")
+				// MapLibre fetches the style, glyphs, sprites and vector tiles
+				// from OpenFreeMap with fetch(), so they need connect-src.
+				"connect-src 'self' https://tiles.openfreemap.org")
 
 		next.ServeHTTP(w, r)
 	})

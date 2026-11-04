@@ -1,8 +1,8 @@
 <div id="map-modal" class="map-modal" role="dialog" aria-modal="true" aria-labelledby="map-modal-title" onclick="if(event.target===this)closeJobMap()">
     <div class="map-modal-content">
         <div class="map-modal-header">
-            <h2 id="map-modal-title">Places</h2>
-            <button type="button" class="map-modal-close" aria-label="Close" onclick="closeJobMap()">&times;</button>
+            <h2 id="map-modal-title">Lugares encontrados</h2>
+            <button type="button" class="map-modal-close" aria-label="Fechar" onclick="closeJobMap()">&times;</button>
         </div>
         <div class="map-modal-body">
             <div id="job-map"></div>
@@ -13,34 +13,127 @@
     (function () {
         var places = {{ . }};
 
+        // MapLibre GL JS (vector map, WebGL) is the main renderer. The version is
+        // pinned on purpose: upgrade it by hand, never to a floating tag. The
+        // SRI hashes are the ones published by cdnjs for this exact version.
+        var MAPLIBRE_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.css';
+        var MAPLIBRE_CSS_SRI = 'sha512-KIMsMWIdnoG9OwZa+oaIafmbDonqck1UCmq+/zcUi2aaZ97N9QE6TqpTM+n36EO40HGh64hU/375zxtjx7WTyQ==';
+        var MAPLIBRE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.js';
+        var MAPLIBRE_JS_SRI = 'sha512-rOFgoUgWaVi69JW1dzBu6PWF9xKW9rxYfY5u2SexFABHhWk0qUWkJoWNz4UuZRMvSXsNZG66+tU5B+HlwWF5kA==';
+
+        // OpenFreeMap styles (free, no API key): light and dark follow the page theme.
+        var MAP_STYLES = {
+            light: 'https://tiles.openfreemap.org/styles/positron',
+            dark: 'https://tiles.openfreemap.org/styles/dark'
+        };
+
+        // Leaflet + OpenStreetMap raster tiles are the FALLBACK, used when the
+        // browser has no WebGL or MapLibre / its style could not be loaded.
         var LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
         var LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
 
-        // ensureLeaflet lazily loads Leaflet (CSS + JS) the first time the map
-        // is opened, then invokes callback once it is available.
-        function ensureLeaflet(callback) {
+        var NOTE_NO_WEBGL = 'Mapa simplificado: este navegador não tem aceleração gráfica (WebGL).';
+        var NOTE_LOAD_FAILED = 'Mapa simplificado: não foi possível carregar o mapa vetorial.';
+
+        function loadStylesheet(id, href, integrity, onLoad, onError) {
+            if (document.getElementById(id)) {
+                onLoad();
+                return;
+            }
+
+            var link = document.createElement('link');
+            link.id = id;
+            link.rel = 'stylesheet';
+            link.href = href;
+            if (integrity) {
+                link.integrity = integrity;
+                link.crossOrigin = 'anonymous';
+            }
+            link.addEventListener('load', onLoad);
+            link.addEventListener('error', function () {
+                link.remove();
+                onError();
+            });
+            document.head.appendChild(link);
+        }
+
+        function loadScript(id, src, integrity, onLoad, onError) {
+            var script = document.getElementById(id);
+            if (!script) {
+                script = document.createElement('script');
+                script.id = id;
+                script.src = src;
+                if (integrity) {
+                    script.integrity = integrity;
+                    script.crossOrigin = 'anonymous';
+                }
+                document.head.appendChild(script);
+            }
+
+            script.addEventListener('load', onLoad);
+            script.addEventListener('error', function () {
+                // Drop the failed tag so a later attempt can retry the download.
+                script.remove();
+                onError();
+            });
+        }
+
+        // ensureLeaflet lazily loads Leaflet (CSS + JS) the first time the
+        // fallback map is needed, then invokes callback once it is available.
+        function ensureLeaflet(callback, onError) {
             if (window.L) {
                 callback();
                 return;
             }
 
-            if (!document.getElementById('leaflet-css')) {
-                var link = document.createElement('link');
-                link.id = 'leaflet-css';
-                link.rel = 'stylesheet';
-                link.href = LEAFLET_CSS;
-                document.head.appendChild(link);
+            loadStylesheet('leaflet-css', LEAFLET_CSS, '', function () {}, function () {});
+            loadScript('leaflet-js', LEAFLET_JS, '', callback, onError);
+        }
+
+        // ensureMapLibre lazily loads MapLibre GL JS (CSS + JS) the first time
+        // the map is opened. onError runs at most once.
+        function ensureMapLibre(callback, onError) {
+            if (window.maplibregl) {
+                callback();
+                return;
             }
 
-            var script = document.getElementById('leaflet-js');
-            if (!script) {
-                script = document.createElement('script');
-                script.id = 'leaflet-js';
-                script.src = LEAFLET_JS;
-                document.head.appendChild(script);
-            }
+            var pending = 2;
+            var failed = false;
+            var fail = function () {
+                if (!failed) {
+                    failed = true;
+                    onError();
+                }
+            };
+            var done = function () {
+                pending--;
+                if (pending === 0 && !failed) {
+                    callback();
+                }
+            };
 
-            script.addEventListener('load', callback);
+            loadStylesheet('maplibre-css', MAPLIBRE_CSS, MAPLIBRE_CSS_SRI, done, fail);
+            loadScript('maplibre-js', MAPLIBRE_JS, MAPLIBRE_JS_SRI, done, fail);
+        }
+
+        // True when the browser can create a WebGL context (machines without a
+        // GPU/driver, or with WebGL disabled, cannot run MapLibre).
+        function hasWebGL() {
+            try {
+                var canvas = document.createElement('canvas');
+                return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function isLightTheme() {
+            return document.documentElement.classList.contains('light');
+        }
+
+        function mapStyleUrl() {
+            return isLightTheme() ? MAP_STYLES.light : MAP_STYLES.dark;
         }
 
         function escapeHtml(str) {
@@ -49,79 +142,437 @@
             return div.innerHTML;
         }
 
-        function createMap() {
-            if (window.__jobMap) {
-                window.__jobMap.remove();
+        // Só links http(s) viram <a>; telefone vira tel: apenas com dígitos.
+        function safeHttpUrl(url) {
+            return typeof url === 'string' && /^https?:\/\//i.test(url) ? encodeURI(url) : '';
+        }
+
+        function telHref(phone) {
+            var digits = String(phone || '').replace(/[^\d+]/g, '');
+            return digits ? 'tel:' + digits : '';
+        }
+
+        function isEmail(value) {
+            return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(value);
+        }
+
+        function websiteLabel(url) {
+            try {
+                return new URL(url).hostname.replace(/^www\./, '');
+            } catch (e) {
+                return url;
+            }
+        }
+
+        function textDiv(className, text) {
+            var el = document.createElement('div');
+            el.className = className;
+            el.textContent = text;
+            return el;
+        }
+
+        function anchor(href, text, external) {
+            var a = document.createElement('a');
+            a.href = href;
+            a.textContent = text;
+            if (external) {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+            }
+            return a;
+        }
+
+        function contactRow(icon, content) {
+            var row = document.createElement('div');
+            row.className = 'place-contact';
+            row.appendChild(document.createTextNode(icon + ' '));
+            row.appendChild(content);
+            return row;
+        }
+
+        // Linhas de contato (telefone, site, e-mails) montadas só com DOM e
+        // textContent: nenhum dado da pesquisa passa por innerHTML.
+        function contactNodes(place) {
+            var rows = [];
+
+            if (place.phone) {
+                var tel = telHref(place.phone);
+                rows.push(contactRow('☎', tel
+                    ? anchor(tel, place.phone, false)
+                    : document.createTextNode(place.phone)));
             }
 
+            var site = safeHttpUrl(place.website);
+            if (site) {
+                rows.push(contactRow('🌐', anchor(site, websiteLabel(place.website), true)));
+            }
+
+            (place.emails || []).filter(isEmail).forEach(function (email) {
+                rows.push(contactRow('✉', anchor('mailto:' + email, email, false)));
+            });
+
+            return rows;
+        }
+
+        // Popup content shared by both renderers (MapLibre and Leaflet accept DOM nodes).
+        function placePopup(place) {
+            var box = document.createElement('div');
+            box.className = 'place-popup';
+
+            var title = document.createElement('strong');
+            title.textContent = place.title || '';
+            box.appendChild(title);
+
+            if (place.address) {
+                box.appendChild(textDiv('place-address', place.address));
+            }
+
+            contactNodes(place).forEach(function (row) {
+                box.appendChild(row);
+            });
+
+            var link = safeHttpUrl(place.link);
+            if (link) {
+                var more = document.createElement('div');
+                more.className = 'place-contact';
+                more.appendChild(anchor(link, 'Ver no Google Maps', true));
+                box.appendChild(more);
+            }
+
+            return box;
+        }
+
+        // Texto de uma empresa para colar em planilha, chat ou e-mail.
+        function placeAsText(place) {
+            var lines = [place.title];
+            if (place.category) { lines.push(place.category); }
+            if (place.address) { lines.push(place.address); }
+            if (place.phone) { lines.push('Telefone: ' + place.phone); }
+            if (place.website) { lines.push('Site: ' + place.website); }
+            var emails = (place.emails || []).filter(isEmail);
+            if (emails.length) { lines.push('E-mail: ' + emails.join(', ')); }
+            if (place.link) { lines.push('Google Maps: ' + place.link); }
+            return lines.join('\n');
+        }
+
+        // navigator.clipboard só existe em HTTPS/localhost; o Hub interno pode
+        // rodar em HTTP, então há um plano B com textarea + execCommand.
+        function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            return new Promise(function (resolve, reject) {
+                var area = document.createElement('textarea');
+                area.value = text;
+                area.setAttribute('readonly', '');
+                area.style.position = 'fixed';
+                area.style.opacity = '0';
+                document.body.appendChild(area);
+                area.select();
+                var ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                area.remove();
+                ok ? resolve() : reject(new Error('copy failed'));
+            });
+        }
+
+        function copyButton(place) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'button button-ghost button-sm place-copy';
+            button.textContent = 'Copiar';
+            button.setAttribute('aria-label', 'Copiar dados de ' + place.title);
+            var timer;
+            button.addEventListener('click', function (event) {
+                event.stopPropagation();
+                copyText(placeAsText(place)).then(function () {
+                    button.textContent = 'Copiado ✓';
+                }, function () {
+                    button.textContent = 'Não foi possível copiar';
+                }).finally(function () {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () { button.textContent = 'Copiar'; }, 1800);
+                });
+            });
+            return button;
+        }
+
+        function placeListItem(place, onSelect) {
+            var item = document.createElement('div');
+            item.className = 'place-item';
+            item.innerHTML = '<div class="place-head"><div class="place-title">' + escapeHtml(place.title) + '</div></div>' +
+                (place.category ? '<div class="place-category">' + escapeHtml(place.category) + '</div>' : '') +
+                (place.address ? '<div class="place-address">' + escapeHtml(place.address) + '</div>' : '') +
+                (place.review_rating ? '<div class="place-rating">★ ' + escapeHtml(String(place.review_rating)) + '</div>' : '');
+            item.querySelector('.place-head').appendChild(copyButton(place));
+
+            // Contacts go between the address and the rating.
+            var rating = item.querySelector('.place-rating');
+            contactNodes(place).forEach(function (row) {
+                item.insertBefore(row, rating);
+            });
+
+            item.addEventListener('click', onSelect);
+            // Clicar em telefone, site ou e-mail não deve mover o mapa.
+            item.querySelectorAll('a').forEach(function (link) {
+                link.addEventListener('click', function (event) { event.stopPropagation(); });
+            });
+            return item;
+        }
+
+        // Resumo no topo da lista: quantos lugares têm cada tipo de contato.
+        function summaryEl() {
+            var count = function (test) { return places.filter(test).length; };
+            var withPhone = count(function (p) { return !!p.phone; });
+            var withSite = count(function (p) { return !!safeHttpUrl(p.website); });
+            var withEmail = count(function (p) { return (p.emails || []).some(isEmail); });
+
+            var el = document.createElement('div');
+            el.className = 'place-summary';
+            el.innerHTML = '<strong>' + places.length + ' lugares</strong>' +
+                '<span>☎ ' + withPhone + ' · 🌐 ' + withSite + ' · ✉ ' + withEmail + '</span>' +
+                (withEmail === 0
+                    ? '<small>Nenhum e-mail coletado. Marque “Buscar e-mails” ao criar a pesquisa.</small>'
+                    : '') +
+                '<small>O CSV traz todas as colunas.</small>';
+            return el;
+        }
+
+        // The orange pin is styled in main.css (.map-pin) from the brand tokens.
+        function pinElement(label) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'map-pin';
+            button.setAttribute('aria-label', label || 'Lugar');
+            var shape = document.createElement('span');
+            shape.className = 'map-pin-shape';
+            button.appendChild(shape);
+            return button;
+        }
+
+        // Each renderer returns the same small adapter:
+        //   addPlace(place) -> handle, select(handle), fit(), showWorld(), remove()
+
+        // createMapLibreMap builds the vector map. onStyleError runs when the
+        // initial style (OpenFreeMap) cannot be fetched, so the caller can fall back.
+        function createMapLibreMap(onStyleError) {
+            var currentLight = isLightTheme();
+            var initialStyle = mapStyleUrl();
+            var map = new maplibregl.Map({
+                container: 'job-map',
+                style: initialStyle,
+                center: [0, 0],
+                zoom: 1,
+                attributionControl: { compact: true }
+            });
+            map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+            var loaded = false;
+            map.once('load', function () { loaded = true; });
+            map.on('error', function (event) {
+                // Tile/glyph errors are ignored; only a dead style means no map.
+                if (!loaded && event && event.error && event.error.url === initialStyle) {
+                    onStyleError();
+                }
+            });
+
+            // Theme switch: only the style changes, the DOM markers stay in place.
+            var observer = new MutationObserver(function () {
+                if (isLightTheme() !== currentLight) {
+                    currentLight = isLightTheme();
+                    map.setStyle(mapStyleUrl());
+                }
+            });
+            observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+            var markers = [];
+            var openPopup = null;
+
+            return {
+                native: map,
+                addPlace: function (place) {
+                    var popup = new maplibregl.Popup({ offset: 30, maxWidth: '280px', focusAfterOpen: false })
+                        .setDOMContent(placePopup(place));
+                    popup.on('open', function () {
+                        if (openPopup && openPopup !== popup) {
+                            openPopup.remove();
+                        }
+                        openPopup = popup;
+                    });
+                    var marker = new maplibregl.Marker({ element: pinElement(place.title), anchor: 'bottom' })
+                        .setLngLat([place.longitude, place.latitude])
+                        .setPopup(popup)
+                        .addTo(map);
+                    markers.push(marker);
+                    return marker;
+                },
+                select: function (marker) {
+                    map.flyTo({ center: marker.getLngLat(), zoom: Math.max(map.getZoom(), 15) });
+                    if (!marker.getPopup().isOpen()) {
+                        marker.togglePopup();
+                    }
+                },
+                fit: function () {
+                    var bounds = new maplibregl.LngLatBounds();
+                    markers.forEach(function (marker) { bounds.extend(marker.getLngLat()); });
+                    map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 0 });
+                },
+                showWorld: function () {},
+                remove: function () {
+                    observer.disconnect();
+                    map.remove();
+                }
+            };
+        }
+
+        // createLeafletMap builds the raster fallback (OpenStreetMap tiles).
+        function createLeafletMap() {
             var map = L.map('job-map');
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '© OpenStreetMap contributors'
             }).addTo(map);
 
-            window.__jobMap = map;
-            return map;
-        }
-
-        function placePopup(place) {
-            var parts = ['<strong>' + escapeHtml(place.title) + '</strong>'];
-            if (place.address) {
-                parts.push(escapeHtml(place.address));
-            }
-            if (place.link && /^https?:\/\//i.test(place.link)) {
-                parts.push('<a href="' + encodeURI(place.link) + '" target="_blank" rel="noopener noreferrer">View on Google Maps</a>');
-            }
-            return parts.join('<br>');
-        }
-
-        function placeListItem(place, onSelect) {
-            var item = document.createElement('div');
-            item.className = 'place-item';
-            item.innerHTML = '<div class="place-title">' + escapeHtml(place.title) + '</div>' +
-                (place.address ? '<div class="place-address">' + escapeHtml(place.address) + '</div>' : '') +
-                (place.review_rating ? '<div class="place-rating">★ ' + escapeHtml(String(place.review_rating)) + '</div>' : '');
-            item.addEventListener('click', onSelect);
-            return item;
-        }
-
-        function renderPlaces(map, listEl) {
             var bounds = [];
 
-            places.forEach(function (place) {
-                var latlng = [place.latitude, place.longitude];
-                bounds.push(latlng);
-
-                L.marker(latlng).bindPopup(placePopup(place)).addTo(map);
-                listEl.appendChild(placeListItem(place, function () {
-                    map.setView(latlng, 16);
-                }));
-            });
-
-            map.fitBounds(bounds, { padding: [30, 30] });
-            setTimeout(function () { map.invalidateSize(); }, 0);
+            return {
+                native: map,
+                addPlace: function (place) {
+                    var latlng = [place.latitude, place.longitude];
+                    bounds.push(latlng);
+                    return L.marker(latlng).bindPopup(placePopup(place)).addTo(map);
+                },
+                select: function (marker) {
+                    map.setView(marker.getLatLng(), 16);
+                    marker.openPopup();
+                },
+                fit: function () {
+                    map.fitBounds(bounds, { padding: [30, 30] });
+                    setTimeout(function () { map.invalidateSize(); }, 0);
+                },
+                showWorld: function () {
+                    map.setView([0, 0], 2);
+                },
+                remove: function () {
+                    map.remove();
+                }
+            };
         }
 
-        function showEmptyState(map, listEl) {
-            listEl.innerHTML = '<p class="map-empty">No places with coordinates were found for this job.</p>';
-            map.setView([0, 0], 2);
+        function noteEl(text) {
+            var el = document.createElement('p');
+            el.className = 'map-note';
+            el.textContent = text;
+            return el;
         }
 
-        function initJobMap() {
+        function showError(text) {
             var listEl = document.getElementById('job-places-list');
-            var map = createMap();
+            if (listEl) {
+                listEl.innerHTML = '<p class="map-error">' + escapeHtml(text) + '</p>';
+            }
+        }
+
+        // renderPlaces fills the side list and the map using the given adapter.
+        function renderPlaces(map, note) {
+            var listEl = document.getElementById('job-places-list');
+
+            if (window.__jobMap) {
+                window.__jobMap.remove();
+            }
+            window.__jobMap = map;
 
             listEl.innerHTML = '';
+            if (note) {
+                listEl.appendChild(noteEl(note));
+            }
 
             if (places.length === 0) {
-                showEmptyState(map, listEl);
+                var empty = document.createElement('p');
+                empty.className = 'map-empty';
+                empty.textContent = 'Nenhum lugar com coordenadas foi encontrado nesta pesquisa.';
+                listEl.appendChild(empty);
+                map.showWorld();
                 return;
             }
 
-            renderPlaces(map, listEl);
+            listEl.appendChild(summaryEl());
+
+            places.forEach(function (place) {
+                var handle = map.addPlace(place);
+                listEl.appendChild(placeListItem(place, function () {
+                    map.select(handle);
+                }));
+            });
+
+            map.fit();
+        }
+
+        function initJobMap() {
+            // A token invalidates callbacks of an earlier open (late script load,
+            // style failure) once the modal was closed or reopened.
+            var token = {};
+            window.__jobMapToken = token;
+            var isCurrent = function () {
+                return window.__jobMapToken === token && !!document.getElementById('job-map');
+            };
+
+            var startLeaflet = function (note) {
+                if (!isCurrent()) {
+                    return;
+                }
+                ensureLeaflet(function () {
+                    if (isCurrent()) {
+                        renderPlaces(createLeafletMap(), note);
+                    }
+                }, function () {
+                    if (isCurrent()) {
+                        showError('Não foi possível carregar o mapa. Verifique a conexão com a internet.');
+                    }
+                });
+            };
+
+            if (!hasWebGL()) {
+                startLeaflet(NOTE_NO_WEBGL);
+                return;
+            }
+
+            ensureMapLibre(function () {
+                if (!isCurrent()) {
+                    return;
+                }
+
+                var map;
+                var fellBack = false;
+                var fallBack = function () {
+                    if (fellBack) {
+                        return;
+                    }
+                    fellBack = true;
+                    if (map) {
+                        map.remove();
+                        if (window.__jobMap === map) {
+                            window.__jobMap = null;
+                        }
+                    }
+                    startLeaflet(NOTE_LOAD_FAILED);
+                };
+
+                try {
+                    map = createMapLibreMap(fallBack);
+                } catch (e) {
+                    fallBack();
+                    return;
+                }
+                renderPlaces(map, '');
+            }, function () {
+                startLeaflet(NOTE_LOAD_FAILED);
+            });
         }
 
         window.closeJobMap = function () {
+            window.__jobMapToken = null;
+
             if (window.__jobMap) {
                 window.__jobMap.remove();
                 window.__jobMap = null;
@@ -133,7 +584,7 @@
             }
         };
 
-        ensureLeaflet(initJobMap);
+        initJobMap();
     })();
     </script>
 </div>
