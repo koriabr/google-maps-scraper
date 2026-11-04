@@ -1,0 +1,157 @@
+/*
+ * KORIA design tokens (identidade visual do Koria Hub).
+ *
+ * Copia fiel de `koria-colors/src/css-vars.css` (spec v1.2) para uso sem build.
+ * Dark é o tema padrão; o tema claro é ativado pela classe `.light` no <html>.
+ * Valores em HSL sem `hsl()` — use sempre `hsl(var(--token))`.
+ *
+ * Fonte da verdade: github.com/koriabr/koria-colors. Não edite os valores
+ * aqui sem alterar o pacote.
+ */
+
+:root {
+    --radius: 0.75rem;
+
+    /* Superfícies e texto (dark) */
+    --background: 222 50% 5%;
+    --foreground: 0 0% 100% / 0.92;
+    --card: 0 0% 100% / 0.03;
+    --card-foreground: 0 0% 100% / 0.92;
+    --popover: 222 40% 9%;
+    --popover-foreground: 0 0% 100% / 0.92;
+    --primary: 18 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 100% / 0.04;
+    --secondary-foreground: 0 0% 100% / 0.92;
+    --muted: 0 0% 100% / 0.04;
+    --muted-foreground: 0 0% 100% / 0.55;
+    --accent: 18 100% 50%;
+    --destructive: 0 84% 60%;
+    --border: 0 0% 100% / 0.08;
+    --input: 0 0% 100% / 0.10;
+    --ring: 18 100% 50% / 0.12;
+
+    --brand-orange: 18 100% 50%;
+    --brand-orange-hover: 16 100% 57%;
+    --brand-orange-pressed: 19 100% 45%;
+    --brand-orange-soft: 18 100% 50% / 0.10;
+
+    --surface: 0 0% 100% / 0.03;
+    --surface-hover: 0 0% 100% / 0.05;
+    --surface-active: 0 0% 100% / 0.07;
+    --surface-elevated: 0 0% 100% / 0.07;
+    --surface-glass: 0 0% 100% / 0.03;
+    --border-strong: 0 0% 100% / 0.12;
+
+    --text-primary: 0 0% 100% / 0.92;
+    --text-secondary: 0 0% 100% / 0.55;
+    --text-muted: 0 0% 100% / 0.35;
+
+    --sidebar-background: 220 30% 11%;
+    --sidebar-foreground: 0 0% 100% / 0.80;
+    --sidebar-primary: 18 100% 50%;
+    --sidebar-accent: 0 0% 100% / 0.06;
+    --sidebar-accent-foreground: 0 0% 100% / 0.96;
+    --sidebar-border: 0 0% 100% / 0.08;
+
+    /* COLORS.status.* — valores únicos, sem escala (#10b981, #f59e0b, #3b82f6) */
+    --status-success: 160 84% 39%;
+    --status-warning: 38 92% 50%;
+    --status-info: 217 91% 60%;
+
+    color-scheme: dark;
+}
+
+:root.dark {
+    color-scheme: dark;
+}
+
+:root.light {
+    --background: 210 20% 96%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --secondary: 210 20% 93%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 20% 93%;
+    --muted-foreground: 215 16% 40%;
+    --border: 220 15% 82%;
+    --input: 220 15% 82%;
+    --ring: 18 100% 50% / 0.25;
+
+    --surface: 0 0% 100%;
+    --surface-hover: 210 20% 95%;
+    --surface-active: 210 20% 93%;
+    --surface-elevated: 0 0% 98%;
+    --surface-glass: 0 0% 100% / 0.9;
+    --border-strong: 220 15% 72%;
+
+    --text-primary: 222 47% 11%;
+    --text-secondary: 215 16% 40%;
+    --text-muted: 215 16% 55%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-accent: 210 20% 95%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 15% 88%;
+
+    color-scheme: light;
+}
+
+/* Utilitários do design system */
+.koria-glass-surface {
+    background: hsl(var(--surface-glass));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border));
+}
+
+.koria-glow-orange {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35), 0 8px 24px hsl(var(--primary) / 0.25);
+}
+
+.koria-text-gradient-orange {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--brand-orange-pressed)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+@keyframes koria-fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes koria-slide-in-right {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes koria-pulse-glow {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 hsl(var(--primary) / 0.55);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px hsl(var(--primary) / 0);
+    }
+}

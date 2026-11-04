@@ -8,7 +8,7 @@ paths:
   /api/v1/jobs:
     post:
       summary: Create a new job scraping task
-      x-code-samples:
+      x-codeSamples:
         - lang: curl
           source: |
             curl -X POST "http://localhost:8080/api/v1/jobs" \
@@ -49,7 +49,7 @@ paths:
 
     get:
       summary: Get all jobs
-      x-code-samples:
+      x-codeSamples:
         - lang: curl
           source: |
             curl -X GET "http://localhost:8080/api/v1/jobs"
@@ -72,7 +72,7 @@ paths:
   /api/v1/jobs/{id}:
     get:
       summary: Get a specific job
-      x-code-samples:
+      x-codeSamples:
         - lang: curl
           source: |
             curl -X GET "http://localhost:8080/api/v1/jobs/6f0c1af8-3c4e-4742-84bb-590938ae8930"
@@ -104,7 +104,7 @@ paths:
 
     delete:
       summary: Delete a specific job
-      x-code-samples:
+      x-codeSamples:
         - lang: curl
           source: |
             curl -X DELETE "http://localhost:8080/api/v1/jobs/455a6a00-cefb-4a9d-9e7d-791f01873700"
@@ -133,7 +133,8 @@ paths:
   /api/v1/jobs/{id}/download:
     get:
       summary: Download job results as CSV
-      x-code-samples:
+      x-codeSamples:
+        - lang: curl
           source: |
             curl -X GET "http://localhost:8080/api/v1/jobs/18eafda3-53a9-4970-ac96-8f8dfc7011c3/download" --output results.csv
       parameters:
@@ -182,8 +183,12 @@ components:
           type: integer
         lat:
           type: string
+          description: >-
+            Optional. Latitude to anchor the search; send together with `lon`.
+            Leave both out to search without a fixed point.
         lon:
           type: string
+          description: Optional. Longitude; send together with `lat`.
         fast_mode:
           type: boolean
         radius:
@@ -194,6 +199,7 @@ components:
           type: boolean
         max_time:
           type: integer
+          description: Maximum run time in seconds. Values below 180 are raised to 180.
         proxies:
           type: array
           items:
@@ -207,17 +213,26 @@ components:
 
     Job:
       type: object
+      description: >-
+        A scraping job. Note that the top-level keys are capitalized
+        (`ID`, `Name`, ...) while the keys inside `Data` are lowercase.
       properties:
-        id:
+        ID:
           type: string
-        name:
+          format: uuid
+        Name:
           type: string
-        date:
+        Date:
           type: string
           format: date-time
-        status:
+          description: When the job was created (UTC).
+        Status:
           type: string
-        data:
+          enum: [pending, working, ok, failed]
+          description: >-
+            `pending` waits in the queue, `working` is running, `ok` finished
+            and its CSV is available, `failed` did not finish.
+        Data:
           $ref: '#/components/schemas/JobData'
 
     JobData:
@@ -245,6 +260,9 @@ components:
           type: boolean
         max_time:
           type: integer
+          description: >-
+            Maximum run time. Sent in **seconds** when creating a job, but
+            returned in **nanoseconds** when reading one.
         proxies:
           type: array
           items:

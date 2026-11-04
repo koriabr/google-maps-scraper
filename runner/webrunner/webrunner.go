@@ -90,6 +90,18 @@ func (w *webrunner) Close(context.Context) error {
 }
 
 func (w *webrunner) work(ctx context.Context) error {
+	// Jobs left "working" by a previous process will never finish: this runner
+	// is the only one that executes them. Fail them so the UI does not show
+	// them as running forever.
+	interrupted, err := w.svc.FailInterruptedJobs(ctx)
+	if err != nil {
+		return fmt.Errorf("recover interrupted jobs: %w", err)
+	}
+
+	if interrupted > 0 {
+		log.Printf("marked %d interrupted job(s) as failed", interrupted)
+	}
+
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -155,6 +167,12 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 
 	outfile, err := os.Create(outpath)
 	if err != nil {
+		job.Status = web.StatusFailed
+
+		if err2 := w.svc.Update(ctx, job); err2 != nil {
+			log.Printf("failed to update job status: %v", err2)
+		}
+
 		return err
 	}
 
@@ -209,6 +227,8 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		w.cfg.ExtraReviews || job.Data.ExtraReviews,
 	)
 	if err != nil {
+		job.Status = web.StatusFailed
+
 		err2 := w.svc.Update(ctx, job)
 		if err2 != nil {
 			log.Printf("failed to update job status: %v", err2)
@@ -242,6 +262,8 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		err = mate.Start(mateCtx, seedJobs...)
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 			cancel()
+
+			job.Status = web.StatusFailed
 
 			err2 := w.svc.Update(ctx, job)
 			if err2 != nil {

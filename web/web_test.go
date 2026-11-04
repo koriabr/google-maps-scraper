@@ -171,8 +171,8 @@ func TestGetJobsHTMXTriggerIsPollingOnly(t *testing.T) {
 		t.Fatalf("delete request must preserve the current page: %s", body)
 	}
 
-	if !strings.Contains(body, `hx-target="#job-tbody"`) {
-		t.Fatal("delete request must replace the paginated job body")
+	if !strings.Contains(body, `hx-target="#jobs-region"`) {
+		t.Fatal("delete request must replace the whole jobs region")
 	}
 }
 
@@ -184,12 +184,12 @@ func TestIndexScrapeFormReplacesPaginatedJobs(t *testing.T) {
 	srv.index(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `hx-target="#job-tbody"`) {
-		t.Fatal("scrape form must target the paginated job body")
+	if !strings.Contains(body, `hx-target="#jobs-region"`) {
+		t.Fatal("scrape form must target the jobs region")
 	}
 
 	if !strings.Contains(body, `hx-swap="outerHTML"`) {
-		t.Fatal("scrape form must replace the paginated job body")
+		t.Fatal("scrape form must replace the jobs region")
 	}
 }
 
@@ -223,7 +223,7 @@ func TestScrapeRendersFirstPageAfterCreatingJob(t *testing.T) {
 		t.Fatal("scrape response must contain the complete paginated job body")
 	}
 
-	if !strings.Contains(body, "new-job") || !strings.Contains(body, "Page 1 of 2") {
+	if !strings.Contains(body, "new-job") || !strings.Contains(body, "Página 1 de 2") {
 		t.Fatalf("unexpected scrape response: %s", body)
 	}
 

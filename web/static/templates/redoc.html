@@ -1,13 +1,252 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>API Documentation</title>
-    <meta charset="utf-8"/>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
-  </head>
-  <body>
-    <redoc spec-url="/static/spec/spec.yaml"></redoc>
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
-  </body>
+    <title>Documentação da API · Koria Hub</title>
+    <link rel="icon" type="image/png" href="/static/img/KORIA_Selo.png">
+    <link rel="apple-touch-icon" href="/static/img/KORIA_Selo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/css/koria.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, sans-serif;
+            color: hsl(var(--foreground));
+            background: hsl(var(--background));
+        }
+
+        .docs-bar {
+            position: fixed;
+            inset: 0 0 auto 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            height: 56px;
+            padding: 0 24px;
+            background: hsl(var(--sidebar-background));
+            border-bottom: 1px solid hsl(var(--sidebar-border));
+        }
+
+        .docs-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: hsl(var(--sidebar-foreground));
+            font-weight: 600;
+        }
+
+        .docs-brand img {
+            display: block;
+            height: 22px;
+            width: auto;
+        }
+
+        .docs-logo-light {
+            display: none !important;
+        }
+
+        :root.light .docs-logo-dark {
+            display: none !important;
+        }
+
+        :root.light .docs-logo-light {
+            display: block !important;
+        }
+
+        .docs-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .docs-actions a,
+        .docs-actions button {
+            padding: 7px 12px;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            color: hsl(var(--sidebar-foreground));
+            background: transparent;
+            border: 1px solid hsl(var(--input));
+            border-radius: calc(var(--radius) - 2px);
+            cursor: pointer;
+        }
+
+        .docs-actions a:hover,
+        .docs-actions button:hover {
+            color: hsl(var(--sidebar-accent-foreground));
+            background: hsl(var(--sidebar-accent));
+        }
+
+        #redoc {
+            padding-top: 56px;
+        }
+
+        #redoc-error {
+            display: none;
+            max-width: 560px;
+            margin: 120px auto;
+            padding: 20px;
+            text-align: center;
+            color: hsl(var(--destructive));
+            background: hsl(var(--destructive) / 0.1);
+            border: 1px solid hsl(var(--destructive) / 0.3);
+            border-radius: var(--radius);
+        }
+
+        /* O Redoc fixa algumas cores escuras no código (rótulos "RESPONSE SCHEMA",
+           tipo de mídia, abas) que o tema não alcança; ajustamos para os tokens. */
+        .redoc-wrap,
+        .api-content {
+            background: hsl(var(--background));
+        }
+
+        #redoc h5 {
+            color: hsl(var(--muted-foreground)) !important;
+            border-bottom-color: hsl(var(--border-strong)) !important;
+        }
+
+        #redoc h5 * {
+            color: inherit !important;
+        }
+
+        #redoc .react-tabs__tab {
+            color: hsl(var(--foreground));
+        }
+
+        #redoc .react-tabs__tab--selected {
+            color: hsl(var(--primary-foreground)) !important;
+            background: hsl(var(--primary)) !important;
+        }
+    </style>
+    <script>
+        try {
+            if (localStorage.getItem('koria-theme') === 'light') {
+                document.documentElement.classList.add('light');
+            }
+        } catch (e) { /* sem localStorage: segue no tema padrão */ }
+    </script>
+</head>
+<body>
+    <header class="docs-bar">
+        <a class="docs-brand" href="/">
+            <img class="docs-logo-dark" src="/static/img/KORIA_Branco_OFICIAL.png" alt="KORIA">
+            <img class="docs-logo-light" src="/static/img/KORIA_Preto_OFICIAL.png" alt="" aria-hidden="true">
+            <span>Documentação da API</span>
+        </a>
+        <div class="docs-actions">
+            <button type="button" id="theme-toggle">Alternar tema</button>
+            <a href="/">Voltar ao Google Maps Scraper</a>
+        </div>
+    </header>
+
+    <div id="redoc"></div>
+    <p id="redoc-error" role="alert">
+        Não foi possível carregar a documentação. A especificação está em
+        <a href="/static/spec/spec.yaml">/static/spec/spec.yaml</a>.
+    </p>
+
+    <script src="/static/lib/redoc-2.5.1.standalone.js"></script>
+    <script>
+    (function () {
+        // O Redoc precisa de cores resolvidas (não aceita var()), então lemos
+        // os tokens do Hub já calculados pelo navegador.
+        var probe = document.createElement('span');
+        document.body.appendChild(probe);
+
+        // Tokens translúcidos (alpha) viram cores opacas sobre o fundo da página:
+        // o Redoc deriva tons a partir destas cores e não lida bem com alpha.
+        function channels(css) {
+            var n = css.match(/[\d.]+/g).map(Number);
+            return { r: n[0], g: n[1], b: n[2], a: n.length > 3 ? n[3] : 1 };
+        }
+
+        var canvas = channels(getComputedStyle(document.body).backgroundColor);
+
+        function color(token) {
+            probe.style.color = 'hsl(var(--' + token + '))';
+            var c = channels(getComputedStyle(probe).color);
+            var mix = function (fg, bg) { return Math.round(fg * c.a + bg * (1 - c.a)); };
+            return 'rgb(' + mix(c.r, canvas.r) + ', ' + mix(c.g, canvas.g) + ', ' + mix(c.b, canvas.b) + ')';
+        }
+
+        var sans = "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif";
+        var mono = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+        var isLight = document.documentElement.classList.contains('light');
+        var panelBackground = isLight ? color('foreground') : color('popover');
+        var panelText = isLight ? color('primary-foreground') : color('foreground');
+
+        var theme = {
+            colors: {
+                primary: { main: color('primary') },
+                success: { main: color('status-success') },
+                warning: { main: color('status-warning') },
+                error: { main: color('destructive') },
+                text: { primary: color('foreground'), secondary: color('muted-foreground') },
+                border: { dark: color('border-strong'), light: color('border') },
+                http: {
+                    get: color('status-success'),
+                    post: color('status-info'),
+                    delete: color('destructive')
+                }
+            },
+            typography: {
+                fontFamily: sans,
+                headings: { fontFamily: sans, fontWeight: '600' },
+                code: { fontFamily: mono, color: color('primary'), backgroundColor: color('muted') },
+                links: { color: color('primary'), visited: color('primary'), hover: color('brand-orange-hover') }
+            },
+            sidebar: {
+                width: '280px',
+                backgroundColor: color('sidebar-background'),
+                textColor: color('sidebar-foreground'),
+                activeTextColor: color('primary')
+            },
+            // Os exemplos de código do Redoc são pensados para fundo escuro,
+            // então o painel direito fica escuro também no tema claro.
+            rightPanel: { backgroundColor: panelBackground, textColor: panelText },
+            codeBlock: { backgroundColor: panelBackground },
+            schema: { nestedBackground: color('muted') }
+        };
+
+        probe.remove();
+
+        document.getElementById('theme-toggle').addEventListener('click', function () {
+            var light = document.documentElement.classList.contains('light');
+            try {
+                localStorage.setItem('koria-theme', light ? 'dark' : 'light');
+            } catch (e) { /* sem persistência: vale só nesta página */ }
+            location.reload();
+        });
+
+        function fail() {
+            document.getElementById('redoc-error').style.display = 'block';
+        }
+
+        if (!window.Redoc) {
+            fail();
+            return;
+        }
+
+        Redoc.init('/static/spec/spec.yaml', {
+            theme: theme,
+            scrollYOffset: 56,
+            expandResponses: '200,201',
+            hideDownloadButton: false
+        }, document.getElementById('redoc'), function (err) {
+            if (err) {
+                fail();
+            }
+        });
+    })();
+    </script>
+</body>
 </html>

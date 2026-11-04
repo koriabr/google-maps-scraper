@@ -1,51 +1,113 @@
-<tbody id="job-tbody" hx-get="/jobs?page={{.CurrentPage}}" hx-trigger="every 10s" hx-swap="outerHTML">
-{{range .Jobs}}
+<div id="jobs-region" hx-get="/jobs?page={{.CurrentPage}}" hx-trigger="every {{.PollEvery}}" hx-swap="outerHTML">
+<div class="table-wrap">
+<table id="job-table">
+    <thead>
+        <tr class="table-head">
+            <th scope="col">Pesquisa</th>
+            <th scope="col">Criada em</th>
+            <th scope="col">Status</th>
+            <th scope="col">Ações</th>
+        </tr>
+    </thead>
+<tbody id="job-tbody">
+{{range .Rows}}
 <tr>
-    <td>{{.ID}}</td>
-    <td>{{.Name}}</td>
-    <td>{{.Date}}</td>
     <td>
-        <span class="status-indicator status-{{.Status}}">{{.Status}}</span>
+        <div class="job-name">{{.Name}}</div>
+        {{if .Keywords}}
+        <div class="chips">
+            {{range .Keywords}}<span class="chip" title="{{.}}">{{.}}</span>{{end}}
+            {{if .MoreKeywords}}<span class="chip chip-more">+{{.MoreKeywords}}</span>{{end}}
+        </div>
+        {{end}}
+        <div class="job-meta"><code>{{.ShortID}}</code> · idioma {{.Lang}} · profundidade {{.Depth}}{{if .Email}} · com e-mails{{end}}{{if .FastMode}} · modo rápido{{end}}</div>
     </td>
+    <td class="col-date"><time datetime="{{.DateISO}}" data-local>{{.DateText}}</time></td>
     <td>
+        <span class="status status-{{.Status}}"><span class="dot" aria-hidden="true"></span>{{.StatusLabel}}</span>
+        {{if .Active}}<div class="job-meta">há {{.Elapsed}}</div>{{end}}
+    </td>
+    <td class="col-actions">
+        <div class="actions">
         {{ if eq .Status "ok" }}
-            <button type="button" class="button view-button"
+            <button type="button" class="button button-ghost button-sm view-button"
                     hx-get="/view?id={{.ID}}"
                     hx-target="#map-modal-container"
-                    hx-swap="innerHTML">View</button>
-            <a href="/download?id={{.ID}}" download class="button download-button">Download</a>
+                    hx-swap="innerHTML">Ver mapa</button>
+            <a href="/download?id={{.ID}}" download class="button button-ghost button-sm download-button">Baixar CSV</a>
         {{ end }}
         <button hx-delete="/delete?id={{.ID}}&page={{$.CurrentPage}}"
-                hx-target="#job-tbody"
+                hx-target="#jobs-region"
                 hx-swap="outerHTML"
-                hx-confirm="Are you sure you want to delete this job?"
-                class="delete-button">Delete</button>
+                hx-confirm="Excluir esta pesquisa? Os resultados também serão removidos."
+                class="button button-danger button-sm delete-button">Excluir</button>
+        </div>
     </td>
 </tr>
 {{end}}
-{{if eq (len .Jobs) 0}}
+{{if eq (len .Rows) 0}}
 <tr>
-    <td colspan="5" style="text-align: center; padding: 1rem;">0 results</td>
+    <td colspan="4">
+        <div class="empty-state">
+            <strong>Nenhuma pesquisa ainda</strong>
+            Preencha o formulário ao lado e clique em “Iniciar pesquisa”.
+        </div>
+    </td>
 </tr>
 {{end}}
 </tbody>
-
-<div id="pagination-container" hx-swap-oob="true">
+</table>
+</div>
+<div id="pagination-container">
     {{if .HasPages}}
-    <div class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem;">
+    <div class="pagination">
         {{if .HasPrev}}
-        <button class="button" hx-get="/jobs?page={{.PrevPage}}" hx-target="#job-tbody" hx-swap="outerHTML">Previous</button>
+        <button class="button button-ghost button-sm" hx-get="/jobs?page={{.PrevPage}}" hx-target="#jobs-region" hx-swap="outerHTML">Anterior</button>
         {{else}}
-        <button class="button" disabled style="opacity: 0.5; cursor: not-allowed;">Previous</button>
+        <button class="button button-ghost button-sm" disabled>Anterior</button>
         {{end}}
-        <span class="page-info">Page {{.CurrentPage}} of {{.TotalPages}}</span>
+        <span class="page-info">Página {{.CurrentPage}} de {{.TotalPages}}</span>
         {{if .HasNext}}
-        <button class="button" hx-get="/jobs?page={{.NextPage}}" hx-target="#job-tbody" hx-swap="outerHTML">Next</button>
+        <button class="button button-ghost button-sm" hx-get="/jobs?page={{.NextPage}}" hx-target="#jobs-region" hx-swap="outerHTML">Próxima</button>
         {{else}}
-        <button class="button" disabled style="opacity: 0.5; cursor: not-allowed;">Next</button>
+        <button class="button button-ghost button-sm" disabled>Próxima</button>
         {{end}}
     </div>
-    {{else}}
-    <div style="display: none;"></div>
     {{end}}
 </div>
+</div>
+
+<span id="jobs-count" class="count-pill" hx-swap-oob="true"{{if eq .Total 0}} hidden{{end}}>{{.Total}}</span>
+
+<div id="run-status" class="run-status{{if .ActiveCount}} is-active{{end}}" role="status" aria-live="polite" data-active="{{.ActiveCount}}" hx-swap-oob="true">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="run-status-text">{{.RunSummary}}</span>
+</div>
+
+<div id="active-panel" hx-swap-oob="true">{{if .Active}}
+    <section class="card active-panel" aria-labelledby="active-title">
+        <div class="card-header">
+            <div>
+                <h2 id="active-title" class="card-title">Em execução agora</h2>
+                <p class="card-desc">A página atualiza sozinha enquanto houver pesquisa em andamento.</p>
+            </div>
+            <span class="count-pill">{{.ActiveCount}}</span>
+        </div>
+        <ul class="active-list">
+        {{range .Active}}
+            <li class="active-item">
+                <div class="active-top">
+                    <span class="active-name">{{.Name}}</span>
+                    <span class="status status-{{.Status}}"><span class="dot" aria-hidden="true"></span>{{.StatusLabel}}</span>
+                </div>
+                <div class="progress{{if .Queued}} is-queued{{end}}" role="progressbar" aria-label="{{.StatusLabel}}: {{.Name}}"></div>
+                <div class="active-meta">
+                    {{range $i, $k := .Keywords}}{{if $i}}, {{end}}{{$k}}{{end}}{{if .MoreKeywords}} e mais {{.MoreKeywords}}{{end}}
+                    · criada há {{.Elapsed}}
+                </div>
+            </li>
+        {{end}}
+        </ul>
+    </section>
+{{end}}</div>
+

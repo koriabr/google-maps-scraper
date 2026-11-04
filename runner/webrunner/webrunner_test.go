@@ -63,6 +63,54 @@ func TestScrapeJobMarksOKBeforeClosingMate(t *testing.T) {
 	}
 }
 
+// A job that cannot start (here: fast mode without coordinates makes the seed
+// jobs fail) must end as failed, not stay "working" forever in the UI.
+func TestScrapeJobMarksFailedWhenSeedJobsFail(t *testing.T) {
+	t.Parallel()
+
+	repo := &memoryJobRepo{}
+	svc := web.NewService(repo, t.TempDir())
+	job := web.Job{
+		ID:     "job-2",
+		Name:   "coffee",
+		Date:   time.Now().UTC(),
+		Status: web.StatusPending,
+		Data: web.JobData{
+			Keywords: []string{"coffee"},
+			Lang:     "en",
+			Zoom:     15,
+			FastMode: true,
+			Depth:    10,
+			MaxTime:  time.Minute,
+		},
+	}
+
+	if err := svc.Create(context.Background(), &job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	w := &webrunner{
+		svc: svc,
+		cfg: &runner.Config{DataFolder: t.TempDir(), Concurrency: 1},
+		setupMate: func(_ context.Context, _ io.Writer, _ *web.Job) (mateRunner, error) {
+			return fakeMate{}, nil
+		},
+	}
+
+	if err := w.scrapeJob(context.Background(), &job); err == nil {
+		t.Fatal("expected scrapeJob to fail without geo coordinates in fast mode")
+	}
+
+	got, err := svc.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+
+	if got.Status != web.StatusFailed {
+		t.Fatalf("status = %q, want %q", got.Status, web.StatusFailed)
+	}
+}
+
 type fakeMate struct {
 	onClose func()
 }
