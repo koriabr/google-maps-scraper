@@ -110,6 +110,16 @@ func New(svc *Service, addr string, opts ...Option) (*Server, error) {
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
 	mux.HandleFunc("/geocode", ans.geocode)
+	mux.HandleFunc("/cnpj/set", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+
+		ans.setCNPJ(w, r)
+	})
+	mux.HandleFunc("/cnpj/clear", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+
+		ans.clearCNPJ(w, r)
+	})
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 
@@ -764,7 +774,7 @@ func (s *Server) viewJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	places, err := s.svc.GetPlaces(r.Context(), id.String())
+	places, err := s.svc.GetPlacesWithCompanies(r.Context(), id.String())
 	if err != nil {
 		if !errors.Is(err, ErrPlacesNotFound) {
 			log.Printf("view job %s: %v", id, err) //nolint:gosec // id is a parsed UUID and cannot contain log control characters.
@@ -785,7 +795,7 @@ func (s *Server) viewJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, places); err != nil {
+	if err := tmpl.Execute(&buf, jobViewData{JobID: id.String(), Places: places}); err != nil {
 		log.Printf("view job %s: render: %v", id, err) //nolint:gosec // id is a parsed UUID and cannot contain log control characters.
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 
@@ -793,6 +803,12 @@ func (s *Server) viewJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = buf.WriteTo(w)
+}
+
+// jobViewData is what the map modal template renders.
+type jobViewData struct {
+	JobID  string
+	Places []Place
 }
 
 func (s *Server) apiDeleteJob(w http.ResponseWriter, r *http.Request) {

@@ -226,7 +226,7 @@ func TestJobViewShowsContactsAndCopyButton(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	tmpl := srv.tmpl["static/templates/job_view.html"]
-	if err := tmpl.Execute(rec, []Place{{Title: "X", Latitude: 1, Longitude: 2, Phone: "123", Emails: []string{}}}); err != nil {
+	if err := tmpl.Execute(rec, jobViewData{JobID: "j", Places: []Place{{Title: "X", Latitude: 1, Longitude: 2, Phone: "123", Emails: []string{}}}}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
