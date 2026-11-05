@@ -199,9 +199,11 @@ func TestSSOLoginFlow(t *testing.T) {
 	page := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	page.Header.Set("Accept", "text/html")
 
+	// Just opening the app sends the person straight to the Hub login, which
+	// brings them back to the app's Hub route after signing in.
 	rec := serve(srv, page)
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "https://hub.example") {
-		t.Fatalf("login page: %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://hub.example/login?redirect=%2Fgmaps" {
+		t.Fatalf("unauthenticated visit: %d -> %q", rec.Code, rec.Header().Get("Location"))
 	}
 
 	htmxReq := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
@@ -225,8 +227,12 @@ func TestSSOLoginFlow(t *testing.T) {
 	ticket := mintTicket(t, testSSOKey, nil)
 	rec = serve(srv, httptest.NewRequest(http.MethodGet, "/sso?ticket="+url.QueryEscape(ticket), http.NoBody))
 
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/?sso=1" {
 		t.Fatalf("sso: %d -> %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	if strings.Contains(rec.Header().Get("Location"), "ticket") {
+		t.Fatal("the redirect must not carry the ticket")
 	}
 
 	if rec.Header().Get("Referrer-Policy") != "no-referrer" {
@@ -870,5 +876,74 @@ func TestBuildHubContactsDropsURLsWithWhitespaceAndKeepsContactless(t *testing.T
 
 	if contacts[0].Position != 2 {
 		t.Fatalf("position must keep the result-list index, got %d", contacts[0].Position)
+	}
+}
+
+func TestUnauthenticatedVisitGoesToTheHubUnlessThereIsSomethingToExplain(t *testing.T) {
+	srv := newHubServer(t, &statefulJobRepo{}, HubConfig{URL: "https://koriahub.com.br"})
+
+	html := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, http.NoBody)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+		return serve(srv, req)
+	}
+
+	for _, path := range []string{"/", "/api/docs", "/anything"} {
+		rec := html(path)
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://koriahub.com.br/login?redirect=%2Fgmaps" {
+			t.Fatalf("%s: %d -> %q", path, rec.Code, rec.Header().Get("Location"))
+		}
+
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s: the redirect must not be cached", path)
+		}
+	}
+
+	// A refused ticket explains itself: redirecting would loop (Hub -> /sso -> Hub).
+	rec := html("/sso?ticket=garbage")
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), hubLoginRefused) ||
+		!strings.Contains(rec.Body.String(), "https://koriahub.com.br/login?redirect=%2Fgmaps") {
+		t.Fatalf("refused ticket: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Back from the Hub without a session (cookies blocked): explain, never loop.
+	rec = html("/?sso=1")
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "cookies") {
+		t.Fatalf("returned without a session: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Non-page requests keep a plain 401 (no redirect for fetch/htmx/API).
+	api := httptest.NewRequest(http.MethodGet, "/api/v1/jobs", http.NoBody)
+	api.Header.Set("Accept", "application/json")
+
+	if rec := serve(srv, api); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("api = %d", rec.Code)
+	}
+
+	post := httptest.NewRequest(http.MethodPost, "/scrape", http.NoBody)
+	post.Header.Set("Accept", "text/html")
+
+	if rec := serve(srv, post); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a POST must get 401, not a redirect: %d", rec.Code)
+	}
+
+	// Without HUB_URL there is nowhere to send them: show the page.
+	noURL := newHubServer(t, &statefulJobRepo{}, HubConfig{})
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Accept", "text/html")
+
+	if rec := serve(noURL, req); rec.Code != http.StatusUnauthorized || strings.Contains(rec.Body.String(), "Entrar pelo Koria Hub") {
+		t.Fatalf("without HUB_URL: %d", rec.Code)
+	}
+}
+
+func TestLoginURLReturnsToTheHubRouteOfTheApp(t *testing.T) {
+	if got := (HubConfig{URL: "https://koriahub.com.br"}).loginURL(); got != "https://koriahub.com.br/login?redirect=%2Fgmaps" {
+		t.Fatalf("loginURL = %q", got)
+	}
+
+	if got := (HubConfig{}).loginURL(); got != "" {
+		t.Fatalf("no HUB_URL, no login URL, got %q", got)
 	}
 }

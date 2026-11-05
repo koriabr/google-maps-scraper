@@ -247,6 +247,13 @@
 
     <script>
     (function () {
+        // Volta do login pelo Hub: tira a marca "?sso=1" do endereço.
+        try {
+            if (/[?&]sso=/.test(window.location.search)) {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+        } catch (e) { /* sem history API: a marca só fica visível */ }
+
         var baseTitle = document.title;
         var errorBox = document.getElementById('error-container');
         var form = document.getElementById('scrape-form');

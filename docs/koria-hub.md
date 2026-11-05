@@ -23,6 +23,15 @@ Nunca coloque os valores no repositório, em PR ou em andamento de tarefa.
 É o mesmo molde dos satélites do Hub (Engenharia, Expedição, Dash TV): o Hub decide quem entra,
 o app decide o que a pessoa faz dentro.
 
+0. **Abrir o scraper direto leva ao Hub.** Quem acessa o endereço do scraper sem sessão é
+   redirecionado (302) para `<HUB_URL>/login?redirect=/gmaps`. O login do Hub devolve a pessoa
+   para a rota `/gmaps` depois de entrar (e quem já está logado no Hub nem vê a tela de login), e
+   essa rota salta de volta para o scraper com o ticket. Não há tela intermediária. Fica de fora do
+   redirecionamento: chamadas da API (`/api/v1/*`), requisições do HTMX e POSTs, que recebem `401`.
+   Para evitar laço, o redirecionamento **não** acontece quando há algo a explicar: ticket recusado
+   (mostra a página com a mensagem) ou retorno do Hub sem sessão, caso de cookies bloqueados
+   (a volta do SSO leva `?sso=1`, e o scraper mostra um aviso em vez de redirecionar de novo).
+   Sem `HUB_URL`, mostra a página de entrada como antes.
 1. No Hub, a pessoa abre o app; o Hub emite um ticket JWT de 60 s e redireciona para
    `<URL do scraper>/sso?ticket=...`. Contrato do ticket: HS256, `kind = gmaps_sso`,
    `iss = koria-hub`, `aud = gmaps`, `jti`, `iat`, `exp`, `username`, `email`, nomes.
