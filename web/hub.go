@@ -64,6 +64,13 @@ const (
 	// hubMaxContacts is the most contacts the Hub accepts per request.
 	hubMaxContacts = 200
 
+	// hubAppPath is the Hub route that opens this app: it asks the Hub for a
+	// ticket and jumps to /sso. The Hub login returns here after signing in.
+	hubAppPath = "/gmaps"
+	// hubSSOMarker is added to the redirect after a successful SSO so a missing
+	// session (blocked cookies) is told apart from "never logged in".
+	hubSSOMarker = "sso"
+
 	hubContactsPath = "/api/minhas-tarefas/apps/gmaps/contatos/"
 	hubAccessPath   = "/api/apps/module-access/"
 
@@ -107,6 +114,17 @@ func HubConfigFromEnv() HubConfig {
 // Enabled reports whether login through the Hub is required.
 func (c HubConfig) Enabled() bool {
 	return c.SSOKey != ""
+}
+
+// loginURL is where an unauthenticated person is sent: the Hub login, which
+// brings them back to this app's Hub route after signing in (and skips the
+// login screen when they already have a Hub session). Empty without HUB_URL.
+func (c HubConfig) loginURL() string {
+	if c.URL == "" {
+		return ""
+	}
+
+	return c.URL + "/login?redirect=" + url.QueryEscape(hubAppPath)
 }
 
 // CanSend reports whether contacts can be pushed to the Hub.
@@ -571,18 +589,37 @@ type loginView struct {
 func (s *Server) renderHubLogin(w http.ResponseWriter, r *http.Request, message string) {
 	w.Header().Set("Cache-Control", "no-store")
 
+	// Only the JSON API (/api/v1/...) answers with data; /api/docs is a page.
+	isAPI := strings.HasPrefix(r.URL.Path, "/api/v1/")
+
 	wantsPage := r.Method == http.MethodGet && r.Header.Get("HX-Request") == "" &&
-		!strings.HasPrefix(r.URL.Path, "/api/") && strings.Contains(r.Header.Get("Accept"), "text/html")
+		!isAPI && strings.Contains(r.Header.Get("Accept"), "text/html")
 
 	if !wantsPage {
 		text := "Sessão expirada ou ausente. Entre pelo Koria Hub."
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if isAPI {
 			renderJSON(w, http.StatusUnauthorized, apiError{Code: http.StatusUnauthorized, Message: text})
 
 			return
 		}
 
 		http.Error(w, text, http.StatusUnauthorized)
+
+		return
+	}
+
+	loginURL := s.hub.cfg.loginURL()
+
+	// Someone who simply opened the app goes straight to the Hub, which brings
+	// them back signed in. Never redirect when there is something to explain
+	// (a refused ticket, revoked access) or when they just came back from the
+	// Hub without a session: that would loop forever.
+	if message == "" && r.URL.Query().Has(hubSSOMarker) {
+		message = "Você entrou pelo Hub, mas o navegador não guardou o acesso. Verifique se os cookies estão liberados para este site e tente de novo."
+	}
+
+	if message == "" && loginURL != "" {
+		http.Redirect(w, r, loginURL, http.StatusFound)
 
 		return
 	}
@@ -595,7 +632,7 @@ func (s *Server) renderHubLogin(w http.ResponseWriter, r *http.Request, message 
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, loginView{Message: message, HubURL: s.hub.cfg.URL}); err != nil {
+	if err := tmpl.Execute(&buf, loginView{Message: message, HubURL: loginURL}); err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 
 		return
@@ -657,7 +694,7 @@ func (s *Server) hubSSO(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("sso login: %s", claims.Username)
 	s.hub.setSessionCookie(w, r, cookie)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/?"+hubSSOMarker+"=1", http.StatusSeeOther)
 }
 
 // hubLogout handles POST /logout: it drops the session and goes back to the Hub.
